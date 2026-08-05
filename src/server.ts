@@ -26,7 +26,10 @@ server.tool(
   'gripforge_attach',
   'Attach a prop (sword, shield, gun, staff/scythe…) onto a rigged character. ' +
     'Finds the hand bone across naming schemes, scales to body height, seats the grip, ' +
-    'and returns a bind + ready-to-paste Three.js / Unity / Godot snippets.',
+    'and returns a bind + ready-to-paste Three.js / Unity / Godot snippets. ' +
+    'Hand closing: rigs WITH finger bones get bind.gripPose rotations (applied by the snippets); ' +
+    'rigs WITHOUT finger bones (mitten hands) need export_glb: true + out_dir to receive ' +
+    'attached.glb with the fist baked in — the JSON bind alone cannot close a mitten hand.',
   {
     character_path: z.string().describe('Absolute path to the rigged character (.glb .gltf .fbx .obj)'),
     prop_path: z.string().describe('Absolute path to the prop mesh'),
@@ -126,6 +129,23 @@ server.tool(
     }
 
     const credits = data.credits as { remaining?: number; limit?: number; plan?: string } | null;
+
+    // Mitten rigs (no real finger bones): the fist is a mesh swap that cannot
+    // travel in the bind JSON — steer the caller toward export_glb.
+    const bind = data.bind as
+      | { gripPose?: unknown[]; fingerRig?: { generated?: boolean; bones?: number } }
+      | undefined;
+    const isMitten =
+      bind?.fingerRig?.generated === true || (bind?.fingerRig && (bind.fingerRig.bones ?? 0) === 0);
+    const noPose = !bind?.gripPose || bind.gripPose.length === 0;
+    const mittenHint =
+      !glbFile && isMitten && noPose
+        ? '\nNOTE: this rig has no real finger bones, so the closed fist exists only as a mesh swap ' +
+          'and is NOT in the bind JSON — the hand will stay open in your engine. ' +
+          'Re-run gripforge_attach with export_glb: true and an out_dir to get attached.glb ' +
+          '(character with the fist closed + prop attached, textures preserved).'
+        : '';
+
     return {
       content: [
         {
@@ -136,7 +156,8 @@ server.tool(
               null,
               2,
             ) +
-            (credits ? `\ncredits: ${credits.remaining}/${credits.limit} remaining (${credits.plan})` : ''),
+            (credits ? `\ncredits: ${credits.remaining}/${credits.limit} remaining (${credits.plan})` : '') +
+            mittenHint,
         },
       ],
     };
