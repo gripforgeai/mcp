@@ -34,9 +34,16 @@ server.tool(
     hand: z.enum(['right', 'left']).optional().describe('Hand side (default right)'),
     height_ratio: z.number().min(0.05).max(1.5).optional().describe('Prop size as a fraction of body height'),
     fist: z.number().min(0).max(1).optional().describe('Fist closing amount, 0 open → 1 closed (default 1)'),
+    export_glb: z
+      .boolean()
+      .optional()
+      .describe(
+        'Bake character + closed fist + prop into one attached.glb (requires out_dir; .glb/.gltf inputs only). ' +
+          'Use this for mitten-hand rigs: the closed fist cannot travel in the bind JSON.',
+      ),
     out_dir: z.string().optional().describe('Write bind.json + engine snippets into this folder'),
   },
-  async ({ character_path, prop_path, style, hand, height_ratio, fist, out_dir }) => {
+  async ({ character_path, prop_path, style, hand, height_ratio, fist, export_glb, out_dir }) => {
     if (!API_KEY) {
       return err(
         'GRIPFORGE_API_KEY missing. Create a free account at ' +
@@ -52,6 +59,15 @@ server.tool(
         return err(`Unsupported format: ${p} — use ${SUPPORTED.join(' ')}`);
       }
     }
+    if (charPath === propPath) {
+      return err(
+        'character_path and prop_path point to the same file. Export the weapon as its own GLB ' +
+          '(Blender: select the weapon only, File > Export > glTF, check "Selected Objects") and pass that as prop_path.',
+      );
+    }
+    if (export_glb && !out_dir) {
+      return err('export_glb needs out_dir — that is where attached.glb will be written.');
+    }
 
     const form = new FormData();
     form.append('character', new Blob([await readFile(charPath)]), basename(charPath));
@@ -60,13 +76,18 @@ server.tool(
     if (hand) form.append('hand', hand);
     if (height_ratio != null) form.append('ratio', String(height_ratio));
     if (fist != null) form.append('fist', String(fist));
+    if (export_glb) form.append('export', 'glb');
     form.append('fingers', '1');
 
     let res: Response;
     try {
       res = await fetch(`${API_URL}/api/v1/attach`, {
         method: 'POST',
-        headers: { 'x-api-key': API_KEY },
+        headers: {
+          'x-api-key': API_KEY,
+          'x-gripforge-client': 'mcp',
+          'user-agent': 'gripforge-mcp/0.1',
+        },
         body: form,
       });
     } catch {
@@ -75,6 +96,11 @@ server.tool(
 
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (res.status === 401) return err('Invalid GRIPFORGE_API_KEY — check it on ' + API_URL + '/account#api');
+    if (res.status === 403) {
+      return err(
+        `MCP access requires a paid plan (indie or studio); the free plan covers the Studio only. Upgrade at ${API_URL}/#pricing`,
+      );
+    }
     if (res.status === 402) {
       const u = data as { used?: number; limit?: number; plan?: string };
       return err(`Quota exceeded (${u.used}/${u.limit}, plan ${u.plan}) — upgrade at ${API_URL}/#pricing`);
@@ -83,6 +109,7 @@ server.tool(
 
     const exportsObj = (data.exports ?? {}) as Record<string, string>;
     let wrote: string | null = null;
+    let glbFile: string | null = null;
     if (out_dir) {
       const dir = resolve(out_dir);
       await mkdir(dir, { recursive: true });
@@ -90,6 +117,11 @@ server.tool(
       if (exportsObj.three) await writeFile(join(dir, 'three.js.txt'), exportsObj.three);
       if (exportsObj.unity) await writeFile(join(dir, 'unity.cs.txt'), exportsObj.unity);
       if (exportsObj.godot) await writeFile(join(dir, 'godot.gd.txt'), exportsObj.godot);
+      const glb = data.glb as { filename?: string; base64?: string } | undefined;
+      if (glb?.base64) {
+        glbFile = join(dir, glb.filename ?? 'attached.glb');
+        await writeFile(glbFile, Buffer.from(glb.base64, 'base64'));
+      }
       wrote = dir;
     }
 
@@ -99,7 +131,11 @@ server.tool(
         {
           type: 'text' as const,
           text:
-            JSON.stringify({ bind: data.bind, confidence: data.confidence, exports: exportsObj, wrote }, null, 2) +
+            JSON.stringify(
+              { bind: data.bind, confidence: data.confidence, exports: exportsObj, wrote, glbFile },
+              null,
+              2,
+            ) +
             (credits ? `\ncredits: ${credits.remaining}/${credits.limit} remaining (${credits.plan})` : ''),
         },
       ],

@@ -52,6 +52,9 @@ Also works with Cursor, Windsurf and any MCP-compatible client — same
 
 - `gripforge_attach` — character + prop in, bone-local bind + Three.js / Unity /
   Godot snippets out. Styles: melee, gun, shield, staff (scythe/polearm).
+  With `export_glb: true` (+ `out_dir`) it also writes `attached.glb`: the
+  character with the fist closed and the prop attached, textures preserved —
+  use this for mitten-hand rigs, whose closed fist cannot travel in a JSON bind.
 - `gripforge_formats` — supported formats & options.
 
 ## Env

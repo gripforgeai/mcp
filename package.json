@@ -1,7 +1,7 @@
 {
   "name": "@gripforgeai/mcp",
-  "version": "0.1.0",
-  "description": "GripForge MCP server — attach weapons & props to rigged characters from Claude Code, Cursor or any MCP client. Calls the GripForge API.",
+  "version": "0.1.1",
+  "description": "GripForge MCP server \u2014 attach weapons & props to rigged characters from Claude Code, Cursor or any MCP client. Calls the GripForge API.",
   "license": "MIT",
   "type": "module",
   "bin": {
