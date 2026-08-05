@@ -25,6 +25,29 @@ Or in `.mcp.json`:
 
 Get a free API key (3 attaches / month) at https://gripforge.ai/login.
 
+## Install (Grok)
+
+```bash
+grok mcp add gripforge --env GRIPFORGE_API_KEY=gf_... -- npx -y @gripforgeai/mcp
+```
+
+Or in `~/.grok/config.toml`:
+
+```toml
+[mcp_servers.gripforge]
+command = "npx"
+args = ["-y", "@gripforgeai/mcp"]
+enabled = true
+startup_timeout_sec = 45
+
+[mcp_servers.gripforge.env]
+GRIPFORGE_API_KEY = "gf_..."
+```
+
+Also works with Cursor, Windsurf and any MCP-compatible client — same
+`command` / `args` / `env` triple.
+
+
 ## Tools
 
 - `gripforge_attach` — character + prop in, bone-local bind + Three.js / Unity /
