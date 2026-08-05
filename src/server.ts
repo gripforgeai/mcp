@@ -113,6 +113,7 @@ server.tool(
     const exportsObj = (data.exports ?? {}) as Record<string, string>;
     let wrote: string | null = null;
     let glbFile: string | null = null;
+    let glbNotes: string[] = [];
     if (out_dir) {
       const dir = resolve(out_dir);
       await mkdir(dir, { recursive: true });
@@ -120,11 +121,12 @@ server.tool(
       if (exportsObj.three) await writeFile(join(dir, 'three.js.txt'), exportsObj.three);
       if (exportsObj.unity) await writeFile(join(dir, 'unity.cs.txt'), exportsObj.unity);
       if (exportsObj.godot) await writeFile(join(dir, 'godot.gd.txt'), exportsObj.godot);
-      const glb = data.glb as { filename?: string; base64?: string } | undefined;
+      const glb = data.glb as { filename?: string; base64?: string; notes?: string[] } | undefined;
       if (glb?.base64) {
         glbFile = join(dir, glb.filename ?? 'attached.glb');
         await writeFile(glbFile, Buffer.from(glb.base64, 'base64'));
       }
+      if (glb?.notes?.length) glbNotes = glb.notes;
       wrote = dir;
     }
 
@@ -157,6 +159,7 @@ server.tool(
               2,
             ) +
             (credits ? `\ncredits: ${credits.remaining}/${credits.limit} remaining (${credits.plan})` : '') +
+            (glbNotes.length ? `\nglb notes:\n- ${glbNotes.join('\n- ')}` : '') +
             mittenHint,
         },
       ],
