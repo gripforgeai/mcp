@@ -27,6 +27,8 @@ server.tool(
   'Attach a prop (sword, shield, gun, staff/scythe…) onto a rigged character. ' +
     'Finds the hand bone across naming schemes, scales to body height, seats the grip, ' +
     'and returns a bind + ready-to-paste Three.js / Unity / Godot snippets. ' +
+    'Exact placement: add an Empty/locator named "grip" on the handle inside the weapon file — ' +
+    'GripForge puts that point in the palm and skips all grip heuristics. ' +
     'Hand closing: rigs WITH finger bones get bind.gripPose rotations (applied by the snippets); ' +
     'rigs WITHOUT finger bones (mitten hands) need export_glb: true + out_dir to receive ' +
     'attached.glb with the fist baked in — the JSON bind alone cannot close a mitten hand.',
