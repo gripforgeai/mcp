@@ -39,6 +39,11 @@ server.tool(
     hand: z.enum(['right', 'left']).optional().describe('Hand side (default right)'),
     height_ratio: z.number().min(0.05).max(1.5).optional().describe('Prop size as a fraction of body height'),
     fist: z.number().min(0).max(1).optional().describe('Fist closing amount, 0 open → 1 closed (default 1)'),
+    grip_offset: z
+      .array(z.number())
+      .length(3)
+      .optional()
+      .describe('Grip fine-tune [palm, lateral, along-handle] in palm units — overrides the weapon-class defaults'),
     export_glb: z
       .boolean()
       .optional()
@@ -48,7 +53,7 @@ server.tool(
       ),
     out_dir: z.string().optional().describe('Write bind.json + engine snippets into this folder'),
   },
-  async ({ character_path, prop_path, style, hand, height_ratio, fist, export_glb, out_dir }) => {
+  async ({ character_path, prop_path, style, hand, height_ratio, fist, grip_offset, export_glb, out_dir }) => {
     if (!API_KEY) {
       return err(
         'GRIPFORGE_API_KEY missing. Create a free account at ' +
@@ -81,6 +86,7 @@ server.tool(
     if (hand) form.append('hand', hand);
     if (height_ratio != null) form.append('ratio', String(height_ratio));
     if (fist != null) form.append('fist', String(fist));
+    if (grip_offset) form.append('grip_offset', grip_offset.join(','));
     if (export_glb) form.append('export', 'glb');
     form.append('fingers', '1');
 
