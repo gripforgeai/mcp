@@ -44,6 +44,10 @@ server.tool(
       .length(3)
       .optional()
       .describe('Grip fine-tune [palm, lateral, along-handle] in palm units — overrides the weapon-class defaults'),
+    ai_refine: z
+      .boolean()
+      .optional()
+      .describe('Vision-model verification of the grip: renders the fist+weapon, checks the hold, auto-corrects (adds ~10-30s)'),
     export_glb: z
       .boolean()
       .optional()
@@ -53,7 +57,7 @@ server.tool(
       ),
     out_dir: z.string().optional().describe('Write bind.json + engine snippets into this folder'),
   },
-  async ({ character_path, prop_path, style, hand, height_ratio, fist, grip_offset, export_glb, out_dir }) => {
+  async ({ character_path, prop_path, style, hand, height_ratio, fist, grip_offset, ai_refine, export_glb, out_dir }) => {
     if (!API_KEY) {
       return err(
         'GRIPFORGE_API_KEY missing. Create a free account at ' +
@@ -87,6 +91,7 @@ server.tool(
     if (height_ratio != null) form.append('ratio', String(height_ratio));
     if (fist != null) form.append('fist', String(fist));
     if (grip_offset) form.append('grip_offset', grip_offset.join(','));
+    if (ai_refine) form.append('refine', 'ai');
     if (export_glb) form.append('export', 'glb');
     form.append('fingers', '1');
 
