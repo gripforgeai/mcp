@@ -1,0 +1,18 @@
+# Smithery configuration — https://smithery.ai/docs
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - gripforgeApiKey
+    properties:
+      gripforgeApiKey:
+        type: string
+        title: GripForge API key
+        description: Create one at https://gripforge.ai/account (starts with gf_)
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', '@gripforgeai/mcp'],
+      env: { GRIPFORGE_API_KEY: config.gripforgeApiKey }
+    })

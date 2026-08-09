@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.json",
+  "name": "io.github.gripforgeai/mcp",
+  "description": "Attach weapons & props to rigged 3D characters — finds the hand bone, scales the prop, closes the fist, returns engine-ready binds (three.js, Unity, Godot) and armed GLB exports.",
+  "repository": {
+    "url": "https://github.com/gripforgeai/mcp",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registry_type": "npm",
+      "registry_base_url": "https://registry.npmjs.org",
+      "identifier": "@gripforgeai/mcp",
+      "version": "0.1.1",
+      "transport": { "type": "stdio" },
+      "environment_variables": [
+        {
+          "name": "GRIPFORGE_API_KEY",
+          "description": "GripForge API key (gf_...) — create one at https://gripforge.ai/account",
+          "is_required": true,
+          "is_secret": true
+        }
+      ]
+    }
+  ]
+}
