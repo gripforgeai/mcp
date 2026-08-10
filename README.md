@@ -23,7 +23,7 @@ Or in `.mcp.json`:
 }
 ```
 
-Get a free API key (3 attaches / month) at https://gripforge.ai/login.
+Get a free API key at https://gripforge.ai/login — the free plan includes **3 API/MCP attaches per month** to try it out (plus 15 in the web Studio). Paid plans from €29/mo for production use.
 
 ## Install (Grok)
 
