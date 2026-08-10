@@ -18,7 +18,7 @@ const API_KEY = process.env.GRIPFORGE_API_KEY;
 
 const SUPPORTED = ['.glb', '.gltf', '.fbx', '.obj'];
 
-const server = new McpServer({ name: 'gripforge', version: '0.1.0' });
+const server = new McpServer({ name: 'gripforge', version: '0.1.2' });
 
 const err = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
 
