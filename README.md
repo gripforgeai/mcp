@@ -83,12 +83,28 @@ Also works with Cursor, Windsurf and any MCP-compatible client — same
 
 ## Tools
 
-- `gripforge_attach` — character + prop in, bone-local bind + Three.js / Unity /
+- `gripforge_style_kit` — resolve "Devil May Cry like" / "genshin" to locker ids
+  already tagged with that look. **Call this before generating.** Reuse the ids.
+- `gripforge_generate_character` — new T-pose + auto-rig into Library (10 credits).
+  `kind=enemy` or the word "enemy" in the prompt. Skip this if style_kit already
+  returned a character.
+- `gripforge_concept_correct` — concept image → strict T-pose sheet (1 credit).
+- `gripforge_attach` — character + prop (paths or Library ids) in, bone-local bind + Three.js / Unity /
   Godot snippets out. Styles: melee, gun, shield, staff (scythe/polearm).
   With `export_glb: true` (+ `out_dir`) it also writes `attached.glb`: the
   character with the fist closed and the prop attached, textures preserved —
   use this for mitten-hand rigs, whose closed fist cannot travel in a JSON bind.
 - `gripforge_formats` — supported formats & options.
+- `gripforge_library_list` / `get` / `push` / `pull` — the Library locker.
+  `pull` writes bind.json + mesh into the open repo (`out_dir`, default `./gripforge-library`).
+  Saving a bind after attach is not a second credit.
+- `gripforge_texture_prep` — local path or `texture_id` → seamless blend + faithful
+  lanczos upscale (1×/2×/4×, max 1024 or 2048). Writes the PNG into `out_dir` and
+  returns the Library albedo URL. Not a generator. No credit.
+- `gripforge_vfx` / `gripforge_vfx_preview` — strike VFX (admin keys).
+- `gripforge_shaders` — list the authorized shader catalog (`{ id, name, engines }`). Search `q=slash_reveal`.
+- `gripforge_shader_pull` — `id` + `engine` (`godot`|`unity`|`three`) + `out_dir` →
+  write sources into the repo and return an assignment snippet. **v1 pull is free**.
 
 ## Env
 
