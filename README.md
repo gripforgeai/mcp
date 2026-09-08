@@ -1,6 +1,6 @@
 # @gripforgeai/mcp
 
-Attach weapons & props to rigged characters — from Claude Code, Cursor or any
+Attach weapons & props to rigged characters — from Cursor, Windsurf, VS Code or any
 MCP client. Thin client for the [GripForge](https://gripforge.ai) API.
 
 ## Hosted endpoint (zero install)
@@ -36,13 +36,9 @@ the npm package); GripForge finds the hand bone, scales the prop to the
 character's hand, closes the fist around the grip and returns the bind JSON,
 ready-to-paste Three.js / Unity / Godot snippets, and optionally the armed GLB.
 
-## Install (Claude Code)
+## Install (any MCP client)
 
-```bash
-claude mcp add gripforge -e GRIPFORGE_API_KEY=gf_... -- npx -y @gripforgeai/mcp
-```
-
-Or in `.mcp.json`:
+Add the server to your client's MCP config (`.mcp.json`, `mcp.json`, settings — the shape is the same everywhere):
 
 ```json
 {

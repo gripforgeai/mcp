@@ -2,7 +2,7 @@
 /**
  * GripForge MCP — thin client.
  *
- * Exposes gripforge_attach to any MCP client (Claude Code, Cursor, Grok…) and
+ * Exposes gripforge_attach to any MCP client (Cursor, Windsurf, Grok…) and
  * delegates the compute to the hosted GripForge API. Requires an API key:
  * create one at https://gripforge.ai/login and set GRIPFORGE_API_KEY in the
  * server env. 1 credit = 1 successful attach.
