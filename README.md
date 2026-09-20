@@ -6,7 +6,87 @@ Turn prompts into production-ready game assets — animated characters with thei
 
 MCP client for the [GripForge](https://gripforge.ai) API — from Claude Code, Cursor, Windsurf, VS Code or any MCP client.
 
-## Hosted endpoint (zero install)
+## How to use
+
+**Hosted — nothing to install.** Point any remote-capable MCP client at `https://gripforge.ai/mcp`
+with your API key ([create one here](https://gripforge.ai/account)):
+
+```jsonc
+{
+  "mcpServers": {
+    "gripforge": {
+      "url": "https://gripforge.ai/mcp",
+      "headers": { "x-api-key": "gf_..." }
+    }
+  }
+}
+```
+
+**Claude Code**, in one line:
+
+```bash
+claude mcp add --transport http gripforge https://gripforge.ai/mcp --header "x-api-key: gf_..."
+```
+
+**Local, via npm** — when the agent must write files into your repository:
+
+```jsonc
+{
+  "mcpServers": {
+    "gripforge": {
+      "command": "npx",
+      "args": ["-y", "@gripforgeai/mcp"],
+      "env": { "GRIPFORGE_API_KEY": "gf_..." }
+    }
+  }
+}
+```
+
+## Key features
+
+- **Characters that move.** Describe one, get a rigged T-pose with an animation set — idle, run,
+  attack — ready to drop into a scene.
+- **Weapons in hand.** GripForge finds the hand bone on any rig, scales the prop, closes the fist
+  around the grip, and returns the bind plus Three.js, Unity and Godot snippets.
+- **Seamless textures.** Tileable material sets from a prompt or from your own image, upscaled
+  without invention.
+- **Terrain and maps.** Playable room graphs, top-down shooter layouts with spawns and lanes,
+  greybox reconstruction from references.
+- **VFX and HUD.** Animated effects and interface kits exported for your engine.
+- **Playable game kits.** Assemble modular capabilities — movement, combat, enemies, worlds — into
+  a game that runs in the browser, then bind your own assets to it.
+- **One Library.** Everything generated lands in a locker your engine can pull from, and that your
+  agent can search by look ("Devil May Cry like", "genshin").
+
+## Use cases
+
+- *"Attach this sword to my knight, right hand, then export the armed GLB."* — the agent handles the
+  bone, the scale and the fist; you get a file that loads.
+- *"Make me a boss for an ashen underworld, with three phases and an arena."* — stats, attacks and
+  engine snippets come back together.
+- *"Give this floor a mossy cobblestone texture that tiles."* — a seamless set, saved to the Library.
+- *"Build a playable roguelike slice I can try in the browser."* — a game kit project with its
+  assets bound, playable from a link.
+
+## FAQ
+
+**Do I need to install anything?** No. The hosted endpoint works from any MCP client that speaks
+streamable HTTP. The npm package exists for one reason: letting the agent write files directly into
+your repository.
+
+**Which engines are supported?** Unity, Godot, Unreal and Three.js — assets come with the binds and
+snippets each one expects.
+
+**How is it billed?** Credits, per generation. Reading the Library, animating an existing character,
+level and map kits cost nothing; generating a character or a weapon costs 10.
+
+**Where do my assets live?** In your workspace Library. You can pull them into your repository, push
+your own, and share them with the community catalog.
+
+**Can I use my own concept art?** Yes — pass an image and GripForge builds the T-pose sheet from it
+rather than inventing a character.
+
+## Hosted endpoint
 
 No Node required — point any remote-capable MCP client at:
 
@@ -85,7 +165,7 @@ Also works with Cursor, Windsurf and any MCP-compatible client — same
 `command` / `args` / `env` triple.
 
 
-## Tools
+## Tool reference
 
 Hosted HTTP MCP (`https://gripforge.ai/mcp`) is always current. This npm package
 writes files into the repo (`out_dir`), including `gripforge_hud`,
