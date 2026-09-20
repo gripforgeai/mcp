@@ -1,0 +1,31 @@
+name: Publier au registre MCP
+
+# L'authentification OIDC parle au nom du dépôt : elle donne le droit de publier
+# sous `io.github.gripforgeai/*` sans dépendre de la politique OAuth de l'organisation.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer mcp-publisher
+        run: |
+          curl -sSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_amd64.tar.gz" \
+            | tar xz mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+
+      - name: Vérifier le manifeste
+        run: mcp-publisher validate
+
+      - name: Publier
+        run: |
+          mcp-publisher login github-oidc
+          mcp-publisher publish
