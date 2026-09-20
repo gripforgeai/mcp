@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.gripforgeai/mcp",
   "title": "GripForge",
-  "description": "The tools your AI needs to make your games.",
+  "description": "The tools your AI needs to make your games. Turn prompts into production-ready game assets — rigged characters, attached weapons, seamless textures, terrain, VFX, HUDs — and playable game kits Unity, Godot, Unreal or Three.js can load.",
   "websiteUrl": "https://gripforge.ai",
   "repository": {
     "url": "https://github.com/gripforgeai/mcp",

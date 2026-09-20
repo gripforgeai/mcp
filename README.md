@@ -1,8 +1,10 @@
 # @gripforgeai/mcp
 
-The tools your AI needs to make your games.
+**The tools your AI needs to make your games.**
 
-Thin MCP client for the [GripForge](https://gripforge.ai) API — attach, Library, kits, HUD, VFX — from Cursor, Windsurf, VS Code or any MCP client.
+Turn prompts into production-ready game assets — rigged characters, attached weapons, seamless textures, terrain, VFX, HUDs — and playable game kits.
+
+MCP client for the [GripForge](https://gripforge.ai) API — from Claude Code, Cursor, Windsurf, VS Code or any MCP client.
 
 ## Hosted endpoint (zero install)
 

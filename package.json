@@ -1,7 +1,7 @@
 {
   "name": "@gripforgeai/mcp",
   "version": "0.1.9",
-  "description": "The tools your AI needs to make your games. GripForge MCP for Cursor, Windsurf, VS Code or any MCP client.",
+  "description": "The tools your AI needs to make your games. Turn prompts into production-ready game assets — rigged characters, attached weapons, seamless textures, terrain, VFX, HUDs — and playable game kits Unity, Godot, Unreal or Three.js can load.",
   "license": "MIT",
   "type": "module",
   "bin": {
