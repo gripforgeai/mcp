@@ -1,6 +1,6 @@
 {
   "name": "@gripforgeai/mcp",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "The tools your AI needs to make your games. Turn prompts into production-ready game assets — animated characters with their weapons attached, seamless textures, terrain, VFX, HUDs — and playable game kits Unity, Godot, Unreal or Three.js can load.",
   "license": "MIT",
   "type": "module",

@@ -4,11 +4,20 @@
   "title": "GripForge",
   "description": "Turn prompts into production-ready game assets: animated characters, textures, terrain, VFX, HUD.",
   "websiteUrl": "https://gripforge.ai",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/gripforgeai/mcp/main/icon.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "512x512"
+      ]
+    }
+  ],
   "repository": {
     "url": "https://github.com/gripforgeai/mcp",
     "source": "github"
   },
-  "version": "0.1.9",
+  "version": "0.1.10",
   "remotes": [
     {
       "type": "streamable-http",
@@ -26,7 +35,7 @@
   "packages": [
     {
       "identifier": "@gripforgeai/mcp",
-      "version": "0.1.9",
+      "version": "0.1.10",
       "transport": {
         "type": "stdio"
       },
