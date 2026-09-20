@@ -2,7 +2,7 @@
 
 **The tools your AI needs to make your games.**
 
-Turn prompts into production-ready game assets — rigged characters, attached weapons, seamless textures, terrain, VFX, HUDs — and playable game kits.
+Turn prompts into production-ready game assets — animated characters with their weapons attached, seamless textures, terrain, VFX, HUDs — and playable game kits.
 
 MCP client for the [GripForge](https://gripforge.ai) API — from Claude Code, Cursor, Windsurf, VS Code or any MCP client.
 
