@@ -184,7 +184,7 @@ export function registerServerTools(
     'Stop a game server',
     'Stop the running instance. Mutating.',
     { id: serverId },
-    { readOnly: false },
+    { readOnly: false, destructive: true },
     (args, extra) => api(`servers/${encodeURIComponent(String(args.id))}/stop`, args, 'POST', extra?.signal),
   );
   tool(
@@ -298,7 +298,7 @@ export function registerServerTools(
     'Kick a player',
     'Requires the Unity SDK. Currently returns 501. Mutating.',
     { id: serverId, player_id: playerId },
-    { readOnly: false },
+    { readOnly: false, destructive: true },
     (args, extra) =>
       api(
         `servers/${encodeURIComponent(String(args.id))}/players/${encodeURIComponent(String(args.player_id))}/kick`,
@@ -399,7 +399,7 @@ export function registerServerTools(
     'Stop a match',
     'Marks the match ended. Mutating.',
     { id: serverId, match_id: matchId },
-    { readOnly: false },
+    { readOnly: false, destructive: true },
     (args, extra) =>
       api(
         `servers/${encodeURIComponent(String(args.id))}/matches/${encodeURIComponent(String(args.match_id))}`,

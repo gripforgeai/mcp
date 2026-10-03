@@ -24,8 +24,9 @@ export const GAMEKIT_LOCAL_TOOL_NAMES = ['gripforge_gamekit_deliver_local', 'gri
 const LOCK_PATH = 'gripforge/gamekits.lock.json';
 const PREV_LOCK_PATH = 'gripforge/gamekits.lock.prev.json';
 const BACKUP_DIR = 'gripforge/.backup';
-const SCAN_ROOTS = ['gripforge', 'assets/gripforge'];
-const GODOT_ROOTS = ['gripforge/', 'assets/gripforge/'];
+const SCAN_ROOTS = ['gripforge', 'assets/gripforge', 'addons/gripforge_gameplay', 'addons/gripforge_net'];
+/** Godot: the kits, bound assets, and the GripForge addons (gameplay core, network transport) the delivery owns. */
+const GODOT_ROOTS = ['gripforge/', 'assets/gripforge/', 'addons/gripforge_gameplay/', 'addons/gripforge_net/'];
 const MAX_FILES = 5000;
 const MAX_BINARY_BYTES = 256 * 1024 * 1024;
 const DERIVED = ['.uid', '.import'];
@@ -131,7 +132,7 @@ function projectPath(dir: string, rel: unknown, opts: { godot: boolean; what?: s
     throw new LocalError('forbidden_path', `${what} ${rel} must be project-relative, without "..", "." or empty segments`, { path: rel });
   }
   if (!norm.startsWith(`${BACKUP_DIR}/`) && segments.some((s) => s.startsWith('.'))) throw new LocalError('forbidden_path', `${what} ${rel} has a hidden segment`, { path: rel });
-  if (opts.godot && !GODOT_ROOTS.some((root) => norm.startsWith(root))) throw new LocalError('forbidden_path', `${what} ${rel} is outside gripforge/ and assets/gripforge/`, { path: rel });
+  if (opts.godot && !GODOT_ROOTS.some((root) => norm.startsWith(root))) throw new LocalError('forbidden_path', `${what} ${rel} is outside gripforge/, assets/gripforge/ and the GripForge addons`, { path: rel });
   const absolute = resolve(dir, ...segments);
   const back = relative(dir, absolute);
   if (!back || back.startsWith('..') || isAbsolute(back)) throw new LocalError('forbidden_path', `${what} ${rel} escapes the project`, { path: rel });
@@ -473,7 +474,7 @@ export function registerGameKitLocalTools(register: VfxProjectRegister, options:
     {
       title: 'Deliver Game Kits into a local engine project',
       description:
-        'npm client only. Deliver Game Kits straight into an engine project folder on this machine: hashes project_dir/gripforge/**, reads gripforge/gamekits.lock.json, asks the GripForge API for the plan, then executes plan.actions with fs — every overwritten or deleted file is copied to gripforge/.backup/<plan id>/ first and the lock is written last. Paths are checked inside project_dir (Godot: gripforge/ and assets/gripforge/ only) and every hash is verified before anything is written. Run dry_run=true first. A blocked plan (conflicts, breaking update) returns the conflicts without touching files: re-run with force or accept_breaking. verify=true runs Godot headless (import, then each kit smoke.gd) when GODOT_BIN is set. Undo with gripforge_gamekit_rollback_local. Credits: the first delivery of a kit major version to an engine costs 1 credit per workspace; re-deliveries, updates within a major and dry runs are free.',
+        'npm client only. Deliver Game Kits straight into an engine project folder on this machine: hashes project_dir/gripforge/**, reads gripforge/gamekits.lock.json, asks the GripForge API for the plan, then executes plan.actions with fs — every overwritten or deleted file is copied to gripforge/.backup/<plan id>/ first and the lock is written last. Paths are checked inside project_dir (Godot: gripforge/, assets/gripforge/ and addons/gripforge_gameplay|gripforge_net only) and every hash is verified before anything is written. Run dry_run=true first. A blocked plan (files edited in the project) returns the conflicts without touching files: re-run with force to back them up and overwrite. Kits always deliver at their latest version. verify=true runs Godot headless (import, then each kit smoke.gd) when GODOT_BIN is set. Undo with gripforge_gamekit_rollback_local. Credits: the first delivery of a kit major version to an engine costs 1 credit per workspace; re-deliveries, updates within a major and dry runs are free.',
       inputSchema: {
         project_dir: projectDirField,
         target: schema.enum(TARGETS).optional().describe('Engine of the project: godot (default), unity or unreal.'),
@@ -481,7 +482,6 @@ export function registerGameKitLocalTools(register: VfxProjectRegister, options:
           .array(
             schema.object({
               id: kitId,
-              version: schema.string().max(40).optional().describe('Exact version; only the latest is deliverable.'),
               config: schema.record(schema.string(), schema.unknown()).optional().describe('Kit config, validated against its configSchema.'),
               bindings: schema.record(schema.string(), schema.string()).optional().describe('Asset slot → Library item id (lib_…).'),
             }),
@@ -493,7 +493,6 @@ export function registerGameKitLocalTools(register: VfxProjectRegister, options:
         mode: schema.enum(['install', 'update', 'uninstall']).optional().describe('install (default), update to the latest catalogue version, or uninstall (uses the lock).'),
         dry_run: schema.boolean().optional().describe('true → plan only; nothing is written or charged.'),
         force: schema.boolean().optional().describe('true → back up then overwrite edited managed files and existing seed files.'),
-        accept_breaking: schema.boolean().optional().describe('true → allow a breaking (major) update.'),
         verify: schema.boolean().optional().describe('true → after writing, run Godot headless (import + smoke.gd per kit) when GODOT_BIN is set.'),
         ...workspace,
       },
@@ -527,7 +526,6 @@ export function registerGameKitLocalTools(register: VfxProjectRegister, options:
             project: { target, ...(engineVersion ? { engineVersion } : {}), lock, files },
             dryRun,
             force: args.force === true,
-            acceptBreaking: args.accept_breaking === true,
           },
           typeof args.workspace_id === 'string' ? args.workspace_id : undefined,
           extra?.signal,

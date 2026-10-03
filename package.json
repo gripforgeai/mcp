@@ -1,7 +1,7 @@
 {
   "name": "@gripforgeai/mcp",
-  "version": "0.1.10",
-  "description": "The tools your AI needs to make your games. Turn prompts into production-ready game assets — animated characters with their weapons attached, seamless textures, terrain, VFX, HUDs — and playable game kits Unity, Godot, Unreal or Three.js can load.",
+  "version": "0.1.11",
+  "description": "The tools your AI needs to make your games. Turn prompts into production-ready game assets \u2014 animated characters with their weapons attached, seamless textures, terrain, VFX, HUDs \u2014 and playable game kits Unity, Godot, Unreal or Three.js can load.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -9,6 +9,11 @@
   },
   "files": [
     "dist",
+    "runtime/unreal-scene-import.py",
+    "runtime/unreal-scene-export.py",
+    "runtime/unreal-scene-upload.mjs",
+    "runtime/unreal_scene_math.py",
+    "runtime/unreal_spawn_review.py",
     "README.md"
   ],
   "scripts": {

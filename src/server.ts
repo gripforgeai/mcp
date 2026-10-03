@@ -16,11 +16,27 @@ import { registerVfxProjectTools, type VfxProjectRegister } from './vfx-project-
 import { registerSceneTools } from './scene-tools.js';
 import { registerServerTools } from './server-tools.js';
 import { registerGameKitTools } from './gamekit-tools.js';
+import { registerStudioToolsTools } from './studio-tools-tools.js';
+import { registerJoystickTools } from './joystick-tools.js';
+import { registerAbilityTools } from './ability-tools.js';
+import { registerAssetProductionTools } from './asset-production-tools.js';
+import { registerCreatureRigTools } from './creature-rig-tools.js';
+import { registerWeaponMotionTools } from './weapon-motion-tools.js';
+import { registerShieldVfxTools } from './shield-vfx-tools.js';
+import { registerProjectileTools } from './projectile-tools.js';
+import { registerArchitectureTools } from './architecture-tools.js';
+import { registerGameConceptTools } from './game-concept-tools.js';
+import { registerMotionTools } from './motion-tools.js';
+import { registerHeroAbilityTools } from './hero-ability-tools.js';
+import { registerGameCreationTools } from './game-creation-tools.js';
 import { registerGameKitLocalTools } from './gamekit-deliver-local.js';
+import { registerMapUnrealLocalTools } from './map-unreal-local.js';
+import { registerMapUnrealImportLocalTools } from './map-unreal-import-local.js';
+import { registerMapUnrealExportLocalTools } from './map-unreal-export-local.js';
 
 const API_URL = process.env.GRIPFORGE_API_URL ?? 'https://gripforge.ai';
 const API_KEY = process.env.GRIPFORGE_API_KEY;
-const MCP_SELF = '0.1.9';
+const MCP_SELF = '0.1.11';
 
 const SUPPORTED = ['.glb', '.gltf', '.fbx', '.obj'];
 
@@ -29,7 +45,23 @@ registerVfxProjectTools((server as unknown as { registerTool: VfxProjectRegister
 registerSceneTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerServerTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGameKitTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerStudioToolsTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGameKitLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY, userAgent: `gripforge-mcp/${MCP_SELF}` });
+registerMapUnrealLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
+registerMapUnrealImportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
+registerMapUnrealExportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerJoystickTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
+registerAbilityTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerCreatureRigTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerWeaponMotionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerShieldVfxTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerProjectileTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerArchitectureTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerGameConceptTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerMotionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerHeroAbilityTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerGameCreationTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerAssetProductionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 
 const err = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
 
@@ -44,7 +76,9 @@ server.tool(
     'GripForge puts that point in the palm and skips all grip heuristics. ' +
     'Hand closing: rigs WITH finger bones get bind.gripPose rotations (applied by the snippets); ' +
     'rigs WITHOUT finger bones (mitten hands) need export_glb: true + out_dir to receive ' +
-    'attached.glb with the fist baked in — the JSON bind alone cannot close a mitten hand.',
+    'attached.glb with the fist baked in — the JSON bind alone cannot close a mitten hand. ' +
+    'Attachment confidence is not visual validation. Inspect bind.review and preview the exported GLB ' +
+    'in the target renderer at idle and during attacks; do not call a needs_review result validated.',
   {
     character_path: z.string().optional().describe('Absolute path to the rigged character (.glb .gltf .fbx .obj)'),
     prop_path: z.string().optional().describe('Absolute path to the prop mesh'),
@@ -231,7 +265,8 @@ server.tool(
             ) +
             (credits ? `\ncredits: ${credits.remaining}/${credits.limit} remaining (${credits.plan})` : '') +
             (glbNotes.length ? `\nglb notes:\n- ${glbNotes.join('\n- ')}` : '') +
-            mittenHint,
+            mittenHint +
+            '\nVisual review required: verify palm contact, wrist continuity and weapon/body clearance in the target renderer. Bone parenting alone does not validate the grip.',
         },
       ],
     };
@@ -367,7 +402,7 @@ async function downloadTo(url: string, dest: string): Promise<boolean> {
   return true;
 }
 
-const KIND = z.enum(['character', 'fps-arms', 'enemy', 'weapon', 'prop', 'texture', 'skybox', 'loading', 'hud', 'button', 'bind', 'vfx', 'animation', 'audio']);
+const KIND = z.enum(['character', 'fps-arms', 'enemy', 'weapon', 'equipment', 'prop', 'texture', 'skybox', 'loading', 'hud', 'button', 'bind', 'vfx', 'animation', 'audio']);
 const TEX_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 
 server.tool(
@@ -464,8 +499,8 @@ server.tool(
 
 server.tool(
   'gripforge_style_kit',
-  'Resolve "Devil May Cry like" / "genshin" to the locker kit already tagged with that game look (characters, enemies, weapons, props). Call this BEFORE generating. Reuse the returned ids.',
-  { prompt: z.string().min(2).max(240).describe('e.g. "devil may cry like", "un ennemi genshin"') },
+  'Resolve "Devil May Cry like" / "open world adventure" to the locker kit already tagged with that game look (characters, enemies, weapons, props). Call this BEFORE generating. Reuse the returned ids.',
+  { prompt: z.string().min(2).max(240).describe('e.g. "devil may cry like", "un ennemi open world adventure"') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const qs = new URLSearchParams({ limit: '200' }) // style= does the matching; q= would also require the prompt in the NAME and empty the kit;
@@ -515,6 +550,7 @@ server.tool(
     'If the look may already be in the locker, call gripforge_style_kit FIRST. ' +
     'For knives/guns use gripforge_generate_weapon. Costs 10 credits. Returns job_id immediately; poll gripforge_generation_read. Closing this call does not cancel it.',
   {
+    idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
     prompt: z.string().min(3).max(600).describe('Description. "Devil May Cry like enemy" → tagged devil-may-cry, kind=enemy.'),
     provider: z.enum(['tripo', 'meshy']).optional().describe('Default tripo. Forced meshy when concept_item / path / file_url is set.'),
     name: z.string().max(160).optional().describe('Library item name (default: the prompt)'),
@@ -526,7 +562,7 @@ server.tool(
     file_url: z.string().optional().describe('https URL of a concept or T-pose image. Image-to-3D.'),
     out_dir: z.string().optional().describe('After the job completes, gripforge_library_pull into this folder.'),
   },
-  async ({ prompt, provider, name, kind, polycount, underwear, concept_item, path, file_url, out_dir }) => {
+  async ({ idempotency_key, prompt, provider, name, kind, polycount, underwear, concept_item, path, file_url, out_dir }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     let image_base64: string | undefined;
     if (path) {
@@ -549,6 +585,7 @@ server.tool(
       method: 'POST',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
       body: JSON.stringify({
+        idempotency_key,
         prompt,
         provider: image_base64 || concept_item ? 'meshy' : provider,
         name,
@@ -587,6 +624,7 @@ server.tool(
     'Default Meshy, no T-pose, no rig. polycount default 4000. style=melee|gun for attach. 10 credits. ' +
     'Do NOT write one-off Meshy scripts.',
   {
+    idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
     prompt: z.string().min(3).max(600).describe('e.g. CS2 default CT combat knife, silver blade, black grip'),
     name: z.string().max(160).optional(),
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
@@ -594,12 +632,13 @@ server.tool(
     provider: z.enum(['meshy', 'tripo']).optional().describe('Default meshy'),
     out_dir: z.string().optional().describe('After the durable job completes, use gripforge_library_pull with this out_dir.'),
   },
-  async ({ prompt, name, polycount, style, provider, out_dir }) => {
+  async ({ idempotency_key, prompt, name, polycount, style, provider, out_dir }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/generate-character`, {
       method: 'POST',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
       body: JSON.stringify({
+        idempotency_key,
         prompt,
         name,
         kind: 'weapon',
@@ -632,25 +671,33 @@ server.tool(
 
 server.tool(
   'gripforge_generate_prop',
-  'CREATE a game-ready prop GLB (kart, crate, banana, barrier…) and save it to Library as kind=prop. Default Meshy, no T-pose, no rig. polycount default 4000. 10 credits. Returns a durable job_id; poll gripforge_generation_read.',
+  'CREATE a game-ready prop GLB (kart, crate, banana, barrier…) and save it to Library as kind=prop. Default Meshy, no T-pose, no rig. polycount default 4000. Quoted against the shared subscription, or 10 GripForge credits if it cannot cover the complete operation. Returns a durable job_id; poll gripforge_generation_read.',
   {
+    idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
     prompt: z.string().min(3).max(600).describe('e.g. compact orange open-cockpit racing kart, isolated'),
     name: z.string().max(160).optional(),
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
     provider: z.enum(['meshy', 'tripo']).optional().describe('Default meshy'),
+    concept_item: z.string().min(1).max(160).optional().describe('Owned concept image in this workspace; forces Meshy image-to-3D.'),
+    concept_items: z.array(z.string().min(1).max(160)).min(2).max(4).optional().describe('2–4 distinct owned views of the SAME prop for Meshy multi-image-to-3D. Do not combine with concept_item. Geometry standard/2k only.'),
+    meshQuality: z.object({ geometry: z.enum(['standard', '2k', '4k']), texture: z.enum(['2k', '4k', '8k']) }).optional().describe('Meshy geometry and PBR texture quality. Requested texture resolution is retained through optimization.'),
+    optimize: z.boolean().optional().describe('Default true; false retains the provider mesh for close-up review.'),
     out_dir: z.string().optional().describe('After the durable job completes, use gripforge_library_pull with this out_dir.'),
+    subtype: z.enum(['vehicle', 'none']).optional().describe('vehicle: made as the Vehicles prop sub-kind — no grip style, nose on +Z, the four wheels split with hub pivots so it drives. Then finished like a game car: paint, glass, chrome, grille and lamp materials, smoothed body, modelled wheels. Detected from the prompt (car, truck, van, kart…) when omitted; none opts out.'),
   },
-  async ({ prompt, name, polycount, provider, out_dir }) => {
+  async ({ idempotency_key, prompt, name, polycount, provider, concept_item, concept_items, meshQuality, optimize, out_dir, subtype }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/generate-character`, {
       method: 'POST',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
       body: JSON.stringify({
+        idempotency_key,
         prompt,
         name,
         kind: 'prop',
+        subtype,
         polycount: polycount ?? 4000,
-        provider: provider ?? 'meshy',
+        provider: provider ?? 'meshy', concept_item, concept_items, meshQuality, optimize,
       }),
     });
     const data = (await res.json().catch(() => ({}))) as {
@@ -933,19 +980,49 @@ server.tool(
 
 server.tool(
   'gripforge_library_list',
-  'List the GripForge Library locker (characters, enemies, weapons, props, textures, HUD, buttons, binds). Filter by kind and/or game style.',
+  'List the GripForge Library locker (characters, enemies, weapons, props, textures, HUD, buttons, binds). Filter by kind and/or game style. Every item carries `rank` {score/100, grade A–D, reasons}: fitness for a GripForge game; sort=rank lists the best fit first. Assets carry a QUALIFICATION, and using it beats searching by name: the KIND is the main type and drives placement (unique per asset); SUBTYPES say what it covers or concerns and several can apply at once — body zones for equipment (helm, chest, shoulder, sleeve, bracer, glove, belt, thigh, greave, boot, cape), usage for a sound (music, ambience, sfx, voice), anchor for a vfx (world, character, weapon). So subtype=boot finds every boot, and kind=equipment with subtype=chest finds a breastplate. roles=true also returns assets where the kind is only a SECONDARY role (the same humanoid body often serves as hero and enemy without a copy). meta.subtypes and meta.alsoKinds come back on every item; tags stay free keywords.',
   {
     kind: KIND.optional().describe('Filter by kind'),
     q: z.string().optional().describe('Search name/filename'),
-    style: z.string().optional().describe('Game look (devil-may-cry, dmc, genshin)'),
+    subtype: z.string().optional().describe('What it covers or concerns: boot, chest, sfx, world…'),
+    roles: z.boolean().optional().describe('With kind: also match assets where this kind is a secondary role'),
+    style: z.string().optional().describe('Game look (devil-may-cry, dmc, open-world-adventure)'),
+    sort: z.enum(['newest', 'rank']).optional().describe('newest (default) or rank: best fit first'),
+    target: z.enum(['mobile', 'desktop']).optional().describe('Platform for the rank budgets. Defaults to mobile.'),
   },
-  async ({ kind, q, style }) => {
+  async ({ kind, q, subtype, roles, style, sort, target }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const qs = new URLSearchParams();
     if (kind) qs.set('kind', kind);
+    if (subtype) qs.set('subtype', subtype);
+    if (roles) qs.set('roles', '1');
     if (q) qs.set('q', q);
     if (style) qs.set('style', style);
+    if (sort === 'rank') qs.set('sort', 'rank');
+    if (target) qs.set('target', target);
     const res = await fetch(`${API_URL}/api/v1/library?${qs}`, { headers: apiHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  'gripforge_library_optimize',
+  'Derive a lighter version of a static model (prop, weapon, equipment, vehicle) for a target: decimated to `triangles`, textures bounded to `texture` px, saved as a NEW Library item linked to its master (meta.lod_of). The master is never changed — generate high once, derive mobile/desktop versions. Wheel pivots and nodes are kept. 0 credits.',
+  {
+    id: z.string().describe('Library id of the master model (lib_…)'),
+    triangles: z.number().int().min(500).max(200000).describe('Target triangles, e.g. 12000 for a mobile car, 40000 desktop'),
+    texture: z.union([z.literal(512), z.literal(1024), z.literal(2048), z.literal(4096)]).optional().describe('Max texture size in px (default 2048)'),
+    name: z.string().max(160).optional(),
+  },
+  async ({ id, triangles, texture, name }) => {
+    if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
+    const res = await fetch(`${API_URL}/api/v1/library/${encodeURIComponent(id)}/optimize`, {
+      method: 'POST',
+      headers: { ...apiHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({ triangles, texture, name }),
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
@@ -1084,21 +1161,27 @@ server.tool(
 
 server.tool(
   'gripforge_library_tag',
-  'Add a game look to tags so style_kit can find the item. Does not overwrite grip style melee/gun.',
+  'Tag or REQUALIFY a Library item. Tags: add a game look so style_kit can find the item (does not overwrite grip style melee/gun). Qualification: kind is the main type and drives placement (only kinds the FILE can carry: a mesh never becomes a HUD); subtypes are cumulative (body zones for equipment: helm, chest, shoulder, sleeve, bracer, glove, belt, thigh, greave, boot, cape; sound usage; vfx anchor) and each must belong to the main type or a secondary role; also_kinds are secondary roles (a humanoid body that is both character and enemy). A refused value comes back with the field it concerns. Fields left out are kept.',
   {
     id: z.string().describe('Library id (lib_…)'),
     style: z.string().optional().describe('Game look id or alias (devil-may-cry, dmc)'),
     tags: z.array(z.string()).optional().describe('Replace tags. Omit to keep existing and just add style.'),
+    kind: z.string().optional().describe('Requalify: the main type (character, enemy, equipment, weapon, prop, texture, hud, vfx, animation, audio…)'),
+    subtypes: z.array(z.string()).optional().describe('Requalify: replace the cumulative subtypes ([] clears them)'),
+    also_kinds: z.array(z.string()).optional().describe('Requalify: replace the secondary roles ([] clears them)'),
   },
-  async ({ id, style, tags }) => {
+  async ({ id, style, tags, kind, subtypes, also_kinds }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/library/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify({ style, tags }),
+      body: JSON.stringify({ style, tags, kind, subtypes, alsoKinds: also_kinds }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
+    if (!res.ok) {
+      const fields = (data as { fields?: Record<string, string[]> }).fields;
+      return err(fields ? Object.entries(fields).map(([f, m]) => `${f}: ${m.join('; ')}`).join(' | ') : String((data as { error?: string }).error ?? res.status));
+    }
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
   },
 );
@@ -1260,7 +1343,7 @@ server.tool(
       hits,
       wrote: [] as string[],
       hint: wanted
-        ? 'Pick by description/use. Locker ids: gripforge_library_pull. Community ids: clone first (1 credit), then pull.'
+        ? 'Pick by description/use. Locker ids: gripforge_library_pull. Community ids: clone first (free unless the creator sets a price in credits), then pull.'
         : 'Pass prompt to filter. Descriptions are on each hit.',
     };
     if (out_dir) {
@@ -1545,17 +1628,80 @@ server.tool(
 
 server.tool(
   'gripforge_vehicle_wheels',
-  'Split the 4 wheels out of a fused kart/car GLB so they can spin: Wheel_FL/FR/RL/RR nodes, hub pivots, extras gf_wheel {radius, axle, spin}. Geometric cut (cylinder + plane, seam invariant under rotation, capped). Run gripforge_vehicle_orient first. 0 credits. apply=false → analysis only.',
+  'Split the 4 wheels out of a fused kart/car GLB so they can spin: Wheel_FL/FR/RL/RR nodes, hub pivots, extras gf_wheel {radius, radiusMeters, axle, spin}. Geometric cut (cylinder + plane, seam invariant under rotation, capped). normalize=true also puts the nose on +Z, the real size in metres and the wheels on y = 0 (works on a vehicle already split). 0 credits. apply=false → analysis only.',
   {
     id: z.string().describe('Library id of the vehicle GLB (lib_…)'),
     apply: z.boolean().optional().describe('default true — rewrite the Library file with the split wheels'),
+    normalize: z.boolean().optional().describe('nose on +Z, metres, wheels on the ground'),
+    reverse: z.boolean().optional().describe('the nose came out backwards: turn the vehicle 180° (with normalize)'),
+    length_m: z.number().min(0.5).max(25).optional().describe('bumper-to-bumper length in metres; default: typical for the vehicle named (car 4.4, SUV 4.7, pickup 5.8, van 5.5, kart 1.8…)'),
   },
-  async ({ id, apply }) => {
+  async ({ id, apply, normalize, length_m, reverse }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/vehicle-wheels`, {
       method: 'POST',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify({ id, apply }),
+      body: JSON.stringify({ id, apply, normalize, length_m, reverse }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+  },
+);
+server.tool(
+  'gripforge_vehicle_finish',
+  'Repair generated automotive surfaces. Preferred: source (immutable static GLB with Body/Wheel_* groups) + repair recipe queues a persistent Blender job; guided glazing/panel regions, paint cleanup, coloured caliper extraction, measured replacement panels/curves with PBR and fitted boundaries, optional rebuilt wheels and rigid wheel rig. features.marks adds surface-fitted pinned PNG logos, relief badges and mesh lettering; wheel markings follow their wheel, named authored marks are replaced in the new work copy. For grilles or trim on a reconstructed recess, set curves.fitSurface.panel to its non-structural panel name to follow the final part. Returns a NEW private work version with GLB/Blend/optional FBX and GripForge review link. Does not promote or overwrite the source. Regions use +Y up/+Z forward metres, bounded displacement; region-only glass stays opaque, authored transmissive panes need an authored cabin. cabin fabricates a measured interior; shellDenoise refines replaced coachwork; material.microSurface embeds reusable PBR detail. render_profile configures shared automotive lighting and post-processing. Poll/cancel/retry generation-jobs. 0 provider credits. Legacy id without repair uses one-time material/wheel finish and rewrites its Library file.',
+  {
+    id: z.string().optional().describe('Library id; with repair pins source, without repair uses legacy finish'),
+    source: z.object({ assetId: z.string(), revisionId: z.string(), fileRole: z.string().optional() }).optional().describe('Pinned static source, instead of id'),
+    repair: z.object({
+      regions: z.array(z.object({ name: z.string(), bounds: z.tuple([z.tuple([z.number(),z.number(),z.number()]),z.tuple([z.number(),z.number(),z.number()])]), select: z.enum(['neutral','paint','all']), surface: z.enum(['glass','paint']), fitAxis: z.enum(['x','y','z']), maxOffsetM: z.number().min(0).max(.05).optional() })).max(16),
+      denoise: z.object({ iterations:z.number().int().min(1).max(80).optional(),maxOffsetM:z.number().min(0).max(.05).optional(),normalIterations:z.number().int().min(0).max(30).optional() }).optional().describe('Bounded Body smoothing across UV seams; pins open boundaries, retains UVs and wheel/caliper transforms; review small details'),
+      cleanPaint: z.boolean().optional(), paintColor: z.tuple([z.number(),z.number(),z.number()]).optional(),
+      cabin: z.object({ bounds:z.tuple([z.tuple([z.number(),z.number(),z.number()]),z.tuple([z.number(),z.number(),z.number()])]), seats:z.union([z.literal(2),z.literal(4)]).optional(), steeringSide:z.enum(['left','right']).optional(), glassMeshes:z.array(z.string().min(1).max(120)).max(12).optional(), glassTransmission:z.number().min(0).max(1).optional(), glassThicknessM:z.number().min(.001).max(.02).optional(), upholsteryColor:z.tuple([z.number(),z.number(),z.number()]).optional(), glassColor:z.tuple([z.number(),z.number(),z.number()]).optional() }).optional().describe('Measured parametric cabin: seats, dashboard, steering, console, floor and trim. Exact isolated transmissive Body pane names only; no inferred segmentation.'),
+      calipers: z.object({ color: z.tuple([z.number(),z.number(),z.number()]), tolerance: z.number().min(.05).max(.4).optional() }).optional(),
+      features: z.object({
+        replaceBody: z.boolean().optional().describe('Explicitly replace coachwork in a new work copy using structural panels; preserve wheels and Body calipers.'),
+        shellDenoise: z.object({ iterations:z.number().int().min(1).max(80).optional(), normalIterations:z.number().int().min(0).max(30).optional(), maxOffsetM:z.number().min(0).max(.05).optional() }).optional().describe('Refine only a newly replaced structural shell; preserves window/cut boundaries and never smooths badges, lamps or wheels.'),
+        panels: z.array(z.object({
+          name: z.string(), points: z.array(z.array(z.tuple([z.number(),z.number(),z.number()])).min(2).max(12)).min(2).max(12),
+          structural: z.boolean().optional().describe('New coachwork shell, required with replaceBody; cannot fit or clip the discarded source.'),
+          normal: z.tuple([z.number(),z.number(),z.number()]).optional(),
+          segmentsU: z.number().int().min(4).max(96).optional(), segmentsV: z.number().int().min(4).max(96).optional(),
+          mirrorX: z.boolean().optional(), material: z.object({ color: z.tuple([z.number(),z.number(),z.number()]).optional(), metallic: z.number().min(0).max(1).optional(), roughness: z.number().min(.02).max(1).optional(), coat: z.number().min(0).max(1).optional(), transmission: z.number().min(0).max(1).optional(), ior: z.number().min(1).max(2.5).optional(), emission: z.number().min(0).max(10).optional(), coatRoughness: z.number().min(0).max(1).optional(), microSurface: z.enum(['paint','leather','rubber','metal']).optional(), detail: z.number().min(0).max(1).optional() }).optional(),
+          replace: z.object({ axis: z.enum(['x','y','z']), depthM: z.number().min(.001).max(.5).optional() }).optional(),
+          fitBoundary: z.object({ axis: z.enum(['x','y','z']), direction: z.union([z.literal(1),z.literal(-1)]).optional(), offsetM: z.number().min(0).max(.01).optional(),fullSurface:z.boolean().optional() }).optional(), sealRadiusM: z.number().min(.0005).max(.03).optional(),
+        })).max(32).optional(),
+        curves: z.array(z.object({
+          name: z.string(), points: z.array(z.tuple([z.number(),z.number(),z.number()])).min(2).max(128),
+          fitSurface: z.object({ axis:z.enum(['x','y','z']), direction:z.union([z.literal(1),z.literal(-1)]).optional(), offsetM:z.number().min(0).max(.01).optional(), panel:z.string().trim().min(1).max(80).optional() }).optional(),
+          radiusM: z.number().min(.0005).max(.08).optional(), closed: z.boolean().optional(), mirrorX: z.boolean().optional(),
+          material: z.object({ color: z.tuple([z.number(),z.number(),z.number()]).optional(), metallic: z.number().min(0).max(1).optional(), roughness: z.number().min(.02).max(1).optional(), coat: z.number().min(0).max(1).optional(), transmission: z.number().min(0).max(1).optional(), ior: z.number().min(1).max(2.5).optional(), emission: z.number().min(0).max(10).optional(), coatRoughness: z.number().min(0).max(1).optional(), microSurface: z.enum(['paint','leather','rubber','metal']).optional(), detail: z.number().min(0).max(1).optional() }).optional(),
+        })).max(256).optional(),
+        marks: z.array(z.object({
+          name:z.string().min(1).max(80), kind:z.enum(['decal','badge','text']), target:z.enum(['Body','Wheel_FL','Wheel_FR','Wheel_RL','Wheel_RR']).optional(),
+          receiver:z.string().trim().min(1).max(120).optional(), position:z.tuple([z.number(),z.number(),z.number()]), normal:z.tuple([z.number(),z.number(),z.number()]), up:z.tuple([z.number(),z.number(),z.number()]),
+          widthM:z.number().min(.005).max(.8),heightM:z.number().min(.005).max(.8),offsetM:z.number().min(.0002).max(.01).optional(),depthM:z.number().min(0).max(.01).optional(),maxDistanceM:z.number().min(.001).max(.12).optional(),segments:z.number().int().min(4).max(32).optional(),mirrorX:z.boolean().optional(),
+          outline:z.array(z.tuple([z.number().min(-.5).max(.5),z.number().min(-.5).max(.5)])).min(3).max(64).optional(),
+          artwork:z.object({assetId:z.string(),revisionId:z.string(),fileRole:z.string().optional()}).optional(),text:z.string().min(1).max(48).optional(),
+          material:z.object({color:z.tuple([z.number(),z.number(),z.number()]).optional(),metallic:z.number().min(0).max(1).optional(),roughness:z.number().min(.02).max(1).optional(),coat:z.number().min(0).max(1).optional(),transmission:z.number().min(0).max(1).optional(),ior:z.number().min(1).max(2.5).optional(),emission:z.number().min(0).max(10).optional(), coatRoughness: z.number().min(0).max(1).optional(), microSurface: z.enum(['paint','leather','rubber','metal']).optional(), detail: z.number().min(0).max(1).optional()}).optional(),
+        })).max(32).optional().describe('Surface-fitted logos and relief: decals require pinned PNG artwork; badges add thickness and a convex outline; text makes mesh lettering. Explicit normal/up frame; target wheel marks spin with that wheel. Optional receiver scopes fitting to a mesh in the target. PNGs <=1 MiB/2048px, max 16 distinct sources. No URLs or local paths.'),
+      }).optional().describe('Measured panels, curves, badges and decals; explicit PBR, clipping, symmetry, 250k vertex budget.'),
+      rig: z.object({ wheelRadius: z.number(), wheelWidth: z.number() }).optional(),
+      wheelRebuild: z.object({ radiusM: z.number().min(.1).max(1.5), widthM: z.number().min(.05).max(.8), spokes: z.number().int().min(3).max(12).optional(), segments: z.number().int().min(24).max(128).optional(), trackM: z.number().min(.3).max(6).optional() }).optional().describe('Replace generated wheel meshes with measured tyres, dished spokes and brake rotors. Optional trackM adjusts axle track and matching explicit Body calipers together; omitted preserves wheel pivots.'),
+    }).optional().describe('Guided surface repair; never edits the source'),
+    render_profile: z.object({ look:z.enum(['studio','daylight']).optional(), quality:z.enum(['performance','balanced','quality']).optional(), lengthM:z.number().min(1).max(25).optional(), ground:z.boolean().optional(), depthOfField:z.boolean().optional(), focusDistanceM:z.number().min(.1).max(1000).optional() }).optional().describe('Shared automotive review scene profile; balanced studio by default. DOF off unless explicitly requested.'),
+    name: z.string().optional(), idempotency_key: z.string().min(8).max(160).optional(),
+    smooth: z.number().int().min(0).max(60).optional().describe('body smoothing passes (default 15, 0 = none)'),
+    wheels: z.boolean().optional().describe('false keeps the generated wheels'),
+    segments: z.number().int().min(12).max(128).optional().describe('wheel roundness: 64 default, 24 for mobile'),
+  },
+  async (args) => {
+    if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
+    const res = await fetch(`${API_URL}/api/v1/vehicle-finish`, {
+      method: 'POST',
+      headers: { ...apiHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify(args),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
