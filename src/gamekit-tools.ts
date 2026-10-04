@@ -18,6 +18,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_game_engine',
   'gripforge_game_content',
   'gripforge_game_play_url',
+  'gripforge_game_test',
   'gripforge_game_web_export',
   'gripforge_moba_roster',
   'gripforge_ability_vfx',
@@ -496,6 +497,21 @@ export function registerGameKitTools(
       const data = { url: playUrl, absolute };
       return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
     },
+  );
+
+  tool(
+    'gripforge_game_test',
+    'Playtest a Game Kit project',
+    'Play the project headless and report what works and what is broken. Run it after building or changing a game, before telling the user it is done. An automatic player spawns, walks, follows the mission waypoints, uses what offers a prompt, picks things up and attacks enemies. Probes check each capability the game provides (character control, combat, XP and levels, inventory, interactions, missions, needs, gathering, crafting, building, machines, world counters). Detectors flag a stuck player, unreachable goals, kit exceptions, NaN positions, a player under the ground, enemies that never reach the player, and step time. Returns { summary, text, report, next }: text has one line per result, ✓ pass, ⚠ warning, ✕ failure, · not checked, each with its time, position, entity or kit; "provoked" means the tester set the condition up through the kit service. Fix the ✕ lines first, then run it again. report.notCovered lists the capabilities no probe looks at. report.replay replays the same inputs; pass it back as replay to check a fix against the same run. Deterministic: same project, seed and budget, same report. Runs in the compute service, about 5–20 s. 0 credits.',
+    {
+      project_id: projectId,
+      budget_seconds: schema.number().int().min(5).max(300).optional().describe('Game time to play, in seconds (default 120).'),
+      seed: schema.number().int().optional().describe('Seed of the run (default 1). The same seed gives the same report.'),
+      replay: schema.record(schema.string(), schema.unknown()).optional().describe('report.replay of an earlier run: plays the same inputs again (seed and budget come from it).'),
+      lang: schema.enum(['en', 'fr']).optional().describe('Language of text (default en).'),
+    },
+    { readOnly: true },
+    (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/playtest`, body(args), 'POST', extra?.signal),
   );
 
   tool(
