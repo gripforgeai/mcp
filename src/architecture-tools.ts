@@ -1,7 +1,8 @@
 import { z } from 'zod/v4';
 import type { VfxProjectRegister } from './vfx-project-tools.js';
+import { LOOK_DESCRIPTION, LOOK_VALUES } from './look.js';
 
-export const ARCHITECTURE_TOOL_NAMES = ['gripforge_architecture_schema', 'gripforge_generate_building', 'gripforge_generate_district'] as const;
+export const ARCHITECTURE_TOOL_NAMES = ['gripforge_architecture_schema', 'gripforge_generate_building', 'gripforge_generate_district', 'gripforge_environment_module'] as const;
 
 /** Hosted and local MCP share the same recipe and durable server workflow. */
 export function registerArchitectureTools(register: VfxProjectRegister, options: { apiUrl: string; getApiKey: () => string | null | undefined }, schema: typeof z = z) {
@@ -11,6 +12,7 @@ export function registerArchitectureTools(register: VfxProjectRegister, options:
     id: schema.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$/).optional(),
     name: schema.string().min(1).max(100).optional(), prompt: schema.string().min(3).max(300),
     style: schema.enum(['realistic', 'stylized', 'lowpoly', 'handpainted']).optional(),
+    look: schema.enum(LOOK_VALUES).optional().describe(`${LOOK_DESCRIPTION} Fills style when style is omitted; toon, anime and pixel add their phrase to the prompt.`),
     use: schema.enum(['residential', 'retail', 'office', 'industrial', 'mixed']).optional(),
     floors: schema.number().int().min(1).max(30).optional(),
     dimensions: schema.object({ width: schema.number().min(3).max(100).optional(), depth: schema.number().min(3).max(100).optional(), height: schema.number().min(3).max(150).optional() }).strict().optional().describe('Maximum footprint and height in metres. Uniform fit preserves proportions; actual dimensions are returned.'),
@@ -35,7 +37,14 @@ export function registerArchitectureTools(register: VfxProjectRegister, options:
     workspace_id: schema.string().max(100).optional(),
     idempotency_key: schema.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional(),
   };
-  const definitions = [
+  const moduleRecipe = schema.object({
+    module: schema.enum(['pillar', 'arch', 'fountain', 'stairs', 'wall', 'pavement', 'rock', 'cliff', 'ruin', 'bridge', 'watchtower', 'shrine', 'guardian']),
+    width: schema.number().min(.3).max(40).optional(), depth: schema.number().min(.3).max(40).optional(), height: schema.number().min(.05).max(20).optional(),
+    seed: schema.number().int().min(0).max(2147483646).optional(),
+    pattern: schema.enum(['radial', 'botanical']).optional().describe('Pavement only: botanical adds a broad leaf rosette inlay, radial keeps the original restrained rings.'),
+    palette: schema.object({ stone: schema.string().regex(/^#[0-9a-f]{6}$/i).optional(), recess: schema.string().regex(/^#[0-9a-f]{6}$/i).optional(), trim: schema.string().regex(/^#[0-9a-f]{6}$/i).optional(), water: schema.string().regex(/^#[0-9a-f]{6}$/i).optional() }).strict().optional(),
+  }).strict();
+  const definitions: Array<{ name: string; kind: string; shape: z.ZodRawShape; title: string; description: string }> = [
     { name: ARCHITECTURE_TOOL_NAMES[0], kind: 'schema', shape: {}, title: 'Architecture · schema', description: 'Read the reusable Meshy building and district contract, example, limits and plan → build workflow. Separate immutable Library assets, scene instances and shared SceneDocument. No paid generation.' },
     { name: ARCHITECTURE_TOOL_NAMES[1], kind: 'building', shape: { ...shared, recipe: building,
       stage: schema.enum(['plan', 'concept', 'build']).optional().describe('plan is free: exact prompts and separate image/3D quotes. concept creates reviewable workspace images. First review artistic scene, then isolated views of the SAME building, then build 3D from chosen isolated references.'),
@@ -45,6 +54,7 @@ export function registerArchitectureTools(register: VfxProjectRegister, options:
       concept_views: schema.array(schema.enum(['front_right', 'front_left', 'rear_right', 'rear_left'])).min(1).max(4).optional().describe('Unique views starting with front_right. Default one view for scene, three for isolated. Alternate views edit the SAME master. recipe.concept reuses an existing master; concept_reference guides a NEW master.'),
     }, title: 'Generate a building', description: 'Reusable plan → artistic concept → isolated reference views → review → Meshy build workflow. Generate 1–4 coherent images through OpenAI (1536×1024 high quality, default) or Imagine (2K), saved as private Library drafts; alternate views reference one master. Separate explicit budgets for concepts and 3D. Accepts text, owned single/multiple concept views or an owned static GLB. Meshy PBR/geometry quality, bounded geometry and uniform metric fit. Durable jobs return workspace links; poll generation_read, cancel/retry preserves finished steps. Review images before building and the real Studio render before publishing. No guaranteed interiors, collisions or LODs. Never substitutes procedural geometry or automatically replaces a game asset.' },
     { name: ARCHITECTURE_TOOL_NAMES[2], kind: 'district', shape: { ...shared, recipe: district }, title: 'Generate a district', description: 'Plan then build a straight-street district from 1–8 distinct Meshy buildings, each manufactured once and reused as separate editable instances. Includes road, pavements, spawn, daylight and camera in the shared Map SceneDocument. Optional owned PBR road/pavement maps; otherwise simple solid surfaces. Plan returns layout, provider-credit count and account quote without spending. Build requires a budget and returns a persistent job, then Map Studio link. Private work version requiring visual review; no automatic Community publication or game replacement.' },
+    { name: ARCHITECTURE_TOOL_NAMES[3], kind: 'module', shape: { stage: schema.enum(['inspect', 'build']).optional(), recipe: moduleRecipe, name: schema.string().min(1).max(100).optional(), workspace_id: schema.string().max(100).optional() }, title: 'Create a reusable environment module', description: 'Free parametric 3D masonry, independent of any game: pillar, arch, fountain, stairs, wall, pavement, rock, cliff, ruin, bridge, watchtower, shrine or a stone guardian. inspect (default) returns real generated bounds, triangle count, metric recipe and assembly sockets. build saves a private textured GLB in the Library, with bevelled geometry, baked vertex shading and named stone/recess/trim/water materials. Dimensions are nominal metres; bounds report actual moulding overhang. Ground origin, stairs ascend toward -Z, <=23 cm risers; top/bottom sockets support assembly. Seed and palette are repeatable. Does not place assets, generate arbitrary AI models, publish, or guarantee navigation/collisions in a target game. 0 credits.' },
   ];
   for (const tool of definitions) register(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.shape,
     annotations: { readOnlyHint: tool.kind === 'schema', destructiveHint: false, idempotentHint: tool.kind === 'schema', openWorldHint: tool.kind !== 'schema' } }, async (args, extra) => {
@@ -54,10 +64,10 @@ export function registerArchitectureTools(register: VfxProjectRegister, options:
     if (!key && tool.kind !== 'schema') return { isError: true, content: [{ type: 'text', text: 'GripForge API key required.' }] };
     const { workspace_id, ...body } = parsed.data as Record<string, unknown>;
     try {
-      const response = await fetch(options.apiUrl.replace(/\/$/, '') + '/api/v1/architecture', {
+      const response = await fetch(options.apiUrl.replace(/\/$/, '') + (tool.kind === 'module' ? '/api/v1/environment-modules' : '/api/v1/architecture'), {
         method: tool.kind === 'schema' ? 'GET' : 'POST',
         headers: { 'content-type': 'application/json', 'x-gripforge-client': 'mcp', ...(key ? { 'x-api-key': key } : {}), ...(typeof workspace_id === 'string' ? { 'x-workspace-id': workspace_id } : {}) },
-        ...(tool.kind === 'schema' ? {} : { body: JSON.stringify({ ...body, kind: tool.kind }) }),
+        ...(tool.kind === 'schema' ? {} : { body: JSON.stringify(tool.kind === 'module' ? body : { ...body, kind: tool.kind }) }),
         signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(extra?.signal ? [extra.signal] : [])]),
       });
       const data = await response.json();

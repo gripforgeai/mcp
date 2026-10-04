@@ -16,7 +16,6 @@ import { registerVfxProjectTools, type VfxProjectRegister } from './vfx-project-
 import { registerSceneTools } from './scene-tools.js';
 import { registerServerTools } from './server-tools.js';
 import { registerGameKitTools } from './gamekit-tools.js';
-import { registerStudioToolsTools } from './studio-tools-tools.js';
 import { registerJoystickTools } from './joystick-tools.js';
 import { registerAbilityTools } from './ability-tools.js';
 import { registerAssetProductionTools } from './asset-production-tools.js';
@@ -36,7 +35,7 @@ import { registerMapUnrealExportLocalTools } from './map-unreal-export-local.js'
 
 const API_URL = process.env.GRIPFORGE_API_URL ?? 'https://gripforge.ai';
 const API_KEY = process.env.GRIPFORGE_API_KEY;
-const MCP_SELF = '0.1.11';
+const MCP_SELF = '0.1.9';
 
 const SUPPORTED = ['.glb', '.gltf', '.fbx', '.obj'];
 
@@ -45,7 +44,6 @@ registerVfxProjectTools((server as unknown as { registerTool: VfxProjectRegister
 registerSceneTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerServerTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGameKitTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
-registerStudioToolsTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGameKitLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY, userAgent: `gripforge-mcp/${MCP_SELF}` });
 registerMapUnrealLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerMapUnrealImportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
@@ -402,7 +400,7 @@ async function downloadTo(url: string, dest: string): Promise<boolean> {
   return true;
 }
 
-const KIND = z.enum(['character', 'fps-arms', 'enemy', 'weapon', 'equipment', 'prop', 'texture', 'skybox', 'loading', 'hud', 'button', 'bind', 'vfx', 'animation', 'audio']);
+const KIND = z.enum(['character', 'fps-arms', 'enemy', 'weapon', 'prop', 'texture', 'skybox', 'loading', 'hud', 'button', 'bind', 'vfx', 'animation', 'audio']);
 const TEX_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 
 server.tool(
@@ -499,8 +497,8 @@ server.tool(
 
 server.tool(
   'gripforge_style_kit',
-  'Resolve "Devil May Cry like" / "open world adventure" to the locker kit already tagged with that game look (characters, enemies, weapons, props). Call this BEFORE generating. Reuse the returned ids.',
-  { prompt: z.string().min(2).max(240).describe('e.g. "devil may cry like", "un ennemi open world adventure"') },
+  'Resolve "Devil May Cry like" / "genshin" to the locker kit already tagged with that game look (characters, enemies, weapons, props). Call this BEFORE generating. Reuse the returned ids.',
+  { prompt: z.string().min(2).max(240).describe('e.g. "devil may cry like", "un ennemi genshin"') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const qs = new URLSearchParams({ limit: '200' }) // style= does the matching; q= would also require the prompt in the NAME and empty the kit;
@@ -980,22 +978,18 @@ server.tool(
 
 server.tool(
   'gripforge_library_list',
-  'List the GripForge Library locker (characters, enemies, weapons, props, textures, HUD, buttons, binds). Filter by kind and/or game style. Every item carries `rank` {score/100, grade A–D, reasons}: fitness for a GripForge game; sort=rank lists the best fit first. Assets carry a QUALIFICATION, and using it beats searching by name: the KIND is the main type and drives placement (unique per asset); SUBTYPES say what it covers or concerns and several can apply at once — body zones for equipment (helm, chest, shoulder, sleeve, bracer, glove, belt, thigh, greave, boot, cape), usage for a sound (music, ambience, sfx, voice), anchor for a vfx (world, character, weapon). So subtype=boot finds every boot, and kind=equipment with subtype=chest finds a breastplate. roles=true also returns assets where the kind is only a SECONDARY role (the same humanoid body often serves as hero and enemy without a copy). meta.subtypes and meta.alsoKinds come back on every item; tags stay free keywords.',
+  'List the GripForge Library locker (characters, enemies, weapons, props, textures, HUD, buttons, binds). Filter by kind and/or game style. Every item carries `rank` {score/100, grade A–D, reasons}: fitness for a GripForge game; sort=rank lists the best fit first.',
   {
     kind: KIND.optional().describe('Filter by kind'),
     q: z.string().optional().describe('Search name/filename'),
-    subtype: z.string().optional().describe('What it covers or concerns: boot, chest, sfx, world…'),
-    roles: z.boolean().optional().describe('With kind: also match assets where this kind is a secondary role'),
-    style: z.string().optional().describe('Game look (devil-may-cry, dmc, open-world-adventure)'),
+    style: z.string().optional().describe('Game look (devil-may-cry, dmc, genshin)'),
     sort: z.enum(['newest', 'rank']).optional().describe('newest (default) or rank: best fit first'),
     target: z.enum(['mobile', 'desktop']).optional().describe('Platform for the rank budgets. Defaults to mobile.'),
   },
-  async ({ kind, q, subtype, roles, style, sort, target }) => {
+  async ({ kind, q, style, sort, target }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const qs = new URLSearchParams();
     if (kind) qs.set('kind', kind);
-    if (subtype) qs.set('subtype', subtype);
-    if (roles) qs.set('roles', '1');
     if (q) qs.set('q', q);
     if (style) qs.set('style', style);
     if (sort === 'rank') qs.set('sort', 'rank');
@@ -1161,27 +1155,21 @@ server.tool(
 
 server.tool(
   'gripforge_library_tag',
-  'Tag or REQUALIFY a Library item. Tags: add a game look so style_kit can find the item (does not overwrite grip style melee/gun). Qualification: kind is the main type and drives placement (only kinds the FILE can carry: a mesh never becomes a HUD); subtypes are cumulative (body zones for equipment: helm, chest, shoulder, sleeve, bracer, glove, belt, thigh, greave, boot, cape; sound usage; vfx anchor) and each must belong to the main type or a secondary role; also_kinds are secondary roles (a humanoid body that is both character and enemy). A refused value comes back with the field it concerns. Fields left out are kept.',
+  'Add a game look to tags so style_kit can find the item. Does not overwrite grip style melee/gun.',
   {
     id: z.string().describe('Library id (lib_…)'),
     style: z.string().optional().describe('Game look id or alias (devil-may-cry, dmc)'),
     tags: z.array(z.string()).optional().describe('Replace tags. Omit to keep existing and just add style.'),
-    kind: z.string().optional().describe('Requalify: the main type (character, enemy, equipment, weapon, prop, texture, hud, vfx, animation, audio…)'),
-    subtypes: z.array(z.string()).optional().describe('Requalify: replace the cumulative subtypes ([] clears them)'),
-    also_kinds: z.array(z.string()).optional().describe('Requalify: replace the secondary roles ([] clears them)'),
   },
-  async ({ id, style, tags, kind, subtypes, also_kinds }) => {
+  async ({ id, style, tags }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/library/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify({ style, tags, kind, subtypes, alsoKinds: also_kinds }),
+      body: JSON.stringify({ style, tags }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const fields = (data as { fields?: Record<string, string[]> }).fields;
-      return err(fields ? Object.entries(fields).map(([f, m]) => `${f}: ${m.join('; ')}`).join(' | ') : String((data as { error?: string }).error ?? res.status));
-    }
+    if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
   },
 );
@@ -1650,7 +1638,7 @@ server.tool(
 );
 server.tool(
   'gripforge_vehicle_finish',
-  'Repair generated automotive surfaces. Preferred: source (immutable static GLB with Body/Wheel_* groups) + repair recipe queues a persistent Blender job; guided glazing/panel regions, paint cleanup, coloured caliper extraction, measured replacement panels/curves with PBR and fitted boundaries, optional rebuilt wheels and rigid wheel rig. features.marks adds surface-fitted pinned PNG logos, relief badges and mesh lettering; wheel markings follow their wheel, named authored marks are replaced in the new work copy. For grilles or trim on a reconstructed recess, set curves.fitSurface.panel to its non-structural panel name to follow the final part. Returns a NEW private work version with GLB/Blend/optional FBX and GripForge review link. Does not promote or overwrite the source. Regions use +Y up/+Z forward metres, bounded displacement; region-only glass stays opaque, authored transmissive panes need an authored cabin. cabin fabricates a measured interior; shellDenoise refines replaced coachwork; material.microSurface embeds reusable PBR detail. render_profile configures shared automotive lighting and post-processing. Poll/cancel/retry generation-jobs. 0 provider credits. Legacy id without repair uses one-time material/wheel finish and rewrites its Library file.',
+  'Repair generated automotive surfaces. Preferred: source (immutable static GLB with Body/Wheel_* groups) + repair recipe queues a persistent Blender job; guided glazing/panel regions, paint cleanup, coloured caliper extraction, measured replacement panels/curves with PBR and fitted boundaries, optional rebuilt wheels and rigid wheel rig. features.marks adds surface-fitted pinned PNG logos, relief badges and mesh lettering; wheel markings follow their wheel, named authored marks are replaced in the new work copy. For grilles or trim on a reconstructed recess, set curves.fitSurface.panel to its non-structural panel name to follow the final part. Returns a NEW private work version with GLB/Blend/optional FBX and GripForge review link. Does not promote or overwrite the source. Regions use +Y up/+Z forward metres, bounded displacement; region-only glass stays opaque, authored transmissive panes need an authored cabin. Poll/cancel/retry generation-jobs. 0 provider credits. Legacy id without repair uses one-time material/wheel finish and rewrites its Library file.',
   {
     id: z.string().optional().describe('Library id; with repair pins source, without repair uses legacy finish'),
     source: z.object({ assetId: z.string(), revisionId: z.string(), fileRole: z.string().optional() }).optional().describe('Pinned static source, instead of id'),
@@ -1658,17 +1646,15 @@ server.tool(
       regions: z.array(z.object({ name: z.string(), bounds: z.tuple([z.tuple([z.number(),z.number(),z.number()]),z.tuple([z.number(),z.number(),z.number()])]), select: z.enum(['neutral','paint','all']), surface: z.enum(['glass','paint']), fitAxis: z.enum(['x','y','z']), maxOffsetM: z.number().min(0).max(.05).optional() })).max(16),
       denoise: z.object({ iterations:z.number().int().min(1).max(80).optional(),maxOffsetM:z.number().min(0).max(.05).optional(),normalIterations:z.number().int().min(0).max(30).optional() }).optional().describe('Bounded Body smoothing across UV seams; pins open boundaries, retains UVs and wheel/caliper transforms; review small details'),
       cleanPaint: z.boolean().optional(), paintColor: z.tuple([z.number(),z.number(),z.number()]).optional(),
-      cabin: z.object({ bounds:z.tuple([z.tuple([z.number(),z.number(),z.number()]),z.tuple([z.number(),z.number(),z.number()])]), seats:z.union([z.literal(2),z.literal(4)]).optional(), steeringSide:z.enum(['left','right']).optional(), glassMeshes:z.array(z.string().min(1).max(120)).max(12).optional(), glassTransmission:z.number().min(0).max(1).optional(), glassThicknessM:z.number().min(.001).max(.02).optional(), upholsteryColor:z.tuple([z.number(),z.number(),z.number()]).optional(), glassColor:z.tuple([z.number(),z.number(),z.number()]).optional() }).optional().describe('Measured parametric cabin: seats, dashboard, steering, console, floor and trim. Exact isolated transmissive Body pane names only; no inferred segmentation.'),
       calipers: z.object({ color: z.tuple([z.number(),z.number(),z.number()]), tolerance: z.number().min(.05).max(.4).optional() }).optional(),
       features: z.object({
         replaceBody: z.boolean().optional().describe('Explicitly replace coachwork in a new work copy using structural panels; preserve wheels and Body calipers.'),
-        shellDenoise: z.object({ iterations:z.number().int().min(1).max(80).optional(), normalIterations:z.number().int().min(0).max(30).optional(), maxOffsetM:z.number().min(0).max(.05).optional() }).optional().describe('Refine only a newly replaced structural shell; preserves window/cut boundaries and never smooths badges, lamps or wheels.'),
         panels: z.array(z.object({
           name: z.string(), points: z.array(z.array(z.tuple([z.number(),z.number(),z.number()])).min(2).max(12)).min(2).max(12),
           structural: z.boolean().optional().describe('New coachwork shell, required with replaceBody; cannot fit or clip the discarded source.'),
           normal: z.tuple([z.number(),z.number(),z.number()]).optional(),
           segmentsU: z.number().int().min(4).max(96).optional(), segmentsV: z.number().int().min(4).max(96).optional(),
-          mirrorX: z.boolean().optional(), material: z.object({ color: z.tuple([z.number(),z.number(),z.number()]).optional(), metallic: z.number().min(0).max(1).optional(), roughness: z.number().min(.02).max(1).optional(), coat: z.number().min(0).max(1).optional(), transmission: z.number().min(0).max(1).optional(), ior: z.number().min(1).max(2.5).optional(), emission: z.number().min(0).max(10).optional(), coatRoughness: z.number().min(0).max(1).optional(), microSurface: z.enum(['paint','leather','rubber','metal']).optional(), detail: z.number().min(0).max(1).optional() }).optional(),
+          mirrorX: z.boolean().optional(), material: z.object({ color: z.tuple([z.number(),z.number(),z.number()]).optional(), metallic: z.number().min(0).max(1).optional(), roughness: z.number().min(.02).max(1).optional(), coat: z.number().min(0).max(1).optional(), transmission: z.number().min(0).max(1).optional(), ior: z.number().min(1).max(2.5).optional(), emission: z.number().min(0).max(10).optional() }).optional(),
           replace: z.object({ axis: z.enum(['x','y','z']), depthM: z.number().min(.001).max(.5).optional() }).optional(),
           fitBoundary: z.object({ axis: z.enum(['x','y','z']), direction: z.union([z.literal(1),z.literal(-1)]).optional(), offsetM: z.number().min(0).max(.01).optional(),fullSurface:z.boolean().optional() }).optional(), sealRadiusM: z.number().min(.0005).max(.03).optional(),
         })).max(32).optional(),
@@ -1676,7 +1662,7 @@ server.tool(
           name: z.string(), points: z.array(z.tuple([z.number(),z.number(),z.number()])).min(2).max(128),
           fitSurface: z.object({ axis:z.enum(['x','y','z']), direction:z.union([z.literal(1),z.literal(-1)]).optional(), offsetM:z.number().min(0).max(.01).optional(), panel:z.string().trim().min(1).max(80).optional() }).optional(),
           radiusM: z.number().min(.0005).max(.08).optional(), closed: z.boolean().optional(), mirrorX: z.boolean().optional(),
-          material: z.object({ color: z.tuple([z.number(),z.number(),z.number()]).optional(), metallic: z.number().min(0).max(1).optional(), roughness: z.number().min(.02).max(1).optional(), coat: z.number().min(0).max(1).optional(), transmission: z.number().min(0).max(1).optional(), ior: z.number().min(1).max(2.5).optional(), emission: z.number().min(0).max(10).optional(), coatRoughness: z.number().min(0).max(1).optional(), microSurface: z.enum(['paint','leather','rubber','metal']).optional(), detail: z.number().min(0).max(1).optional() }).optional(),
+          material: z.object({ color: z.tuple([z.number(),z.number(),z.number()]).optional(), metallic: z.number().min(0).max(1).optional(), roughness: z.number().min(.02).max(1).optional(), coat: z.number().min(0).max(1).optional(), transmission: z.number().min(0).max(1).optional(), ior: z.number().min(1).max(2.5).optional(), emission: z.number().min(0).max(10).optional() }).optional(),
         })).max(256).optional(),
         marks: z.array(z.object({
           name:z.string().min(1).max(80), kind:z.enum(['decal','badge','text']), target:z.enum(['Body','Wheel_FL','Wheel_FR','Wheel_RL','Wheel_RR']).optional(),
@@ -1684,13 +1670,12 @@ server.tool(
           widthM:z.number().min(.005).max(.8),heightM:z.number().min(.005).max(.8),offsetM:z.number().min(.0002).max(.01).optional(),depthM:z.number().min(0).max(.01).optional(),maxDistanceM:z.number().min(.001).max(.12).optional(),segments:z.number().int().min(4).max(32).optional(),mirrorX:z.boolean().optional(),
           outline:z.array(z.tuple([z.number().min(-.5).max(.5),z.number().min(-.5).max(.5)])).min(3).max(64).optional(),
           artwork:z.object({assetId:z.string(),revisionId:z.string(),fileRole:z.string().optional()}).optional(),text:z.string().min(1).max(48).optional(),
-          material:z.object({color:z.tuple([z.number(),z.number(),z.number()]).optional(),metallic:z.number().min(0).max(1).optional(),roughness:z.number().min(.02).max(1).optional(),coat:z.number().min(0).max(1).optional(),transmission:z.number().min(0).max(1).optional(),ior:z.number().min(1).max(2.5).optional(),emission:z.number().min(0).max(10).optional(), coatRoughness: z.number().min(0).max(1).optional(), microSurface: z.enum(['paint','leather','rubber','metal']).optional(), detail: z.number().min(0).max(1).optional()}).optional(),
+          material:z.object({color:z.tuple([z.number(),z.number(),z.number()]).optional(),metallic:z.number().min(0).max(1).optional(),roughness:z.number().min(.02).max(1).optional(),coat:z.number().min(0).max(1).optional(),transmission:z.number().min(0).max(1).optional(),ior:z.number().min(1).max(2.5).optional(),emission:z.number().min(0).max(10).optional()}).optional(),
         })).max(32).optional().describe('Surface-fitted logos and relief: decals require pinned PNG artwork; badges add thickness and a convex outline; text makes mesh lettering. Explicit normal/up frame; target wheel marks spin with that wheel. Optional receiver scopes fitting to a mesh in the target. PNGs <=1 MiB/2048px, max 16 distinct sources. No URLs or local paths.'),
       }).optional().describe('Measured panels, curves, badges and decals; explicit PBR, clipping, symmetry, 250k vertex budget.'),
       rig: z.object({ wheelRadius: z.number(), wheelWidth: z.number() }).optional(),
       wheelRebuild: z.object({ radiusM: z.number().min(.1).max(1.5), widthM: z.number().min(.05).max(.8), spokes: z.number().int().min(3).max(12).optional(), segments: z.number().int().min(24).max(128).optional(), trackM: z.number().min(.3).max(6).optional() }).optional().describe('Replace generated wheel meshes with measured tyres, dished spokes and brake rotors. Optional trackM adjusts axle track and matching explicit Body calipers together; omitted preserves wheel pivots.'),
     }).optional().describe('Guided surface repair; never edits the source'),
-    render_profile: z.object({ look:z.enum(['studio','daylight']).optional(), quality:z.enum(['performance','balanced','quality']).optional(), lengthM:z.number().min(1).max(25).optional(), ground:z.boolean().optional(), depthOfField:z.boolean().optional(), focusDistanceM:z.number().min(.1).max(1000).optional() }).optional().describe('Shared automotive review scene profile; balanced studio by default. DOF off unless explicitly requested.'),
     name: z.string().optional(), idempotency_key: z.string().min(8).max(160).optional(),
     smooth: z.number().int().min(0).max(60).optional().describe('body smoothing passes (default 15, 0 = none)'),
     wheels: z.boolean().optional().describe('false keeps the generated wheels'),

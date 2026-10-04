@@ -522,11 +522,17 @@ export function registerGameKitTools(
 
   tool(
     'gripforge_moba_map',
-    'Generate, check and set the map of a MOBA project',
-    'The map of a moba project as a gameplay plan: bounds, team bases and spawns, 1 to 5 lanes (the minions\' paths), structure slots (towers, inhibitors, nexus), jungle zones and camp slots, objective zones, the divider (river: walkable; chasm, lava, void: crossed only at bridges), crossings, bush zones, walls, camera limits and symmetry. action "generate" builds a fair map (mirrored through the centre) from lanes, divider, size, team_size, camps_per_jungle, objectives, bushes, walls and returns it with a playability report; apply: true puts it in the project (moba_maps, the match\'s map and team size, the camera turn). action "validate" checks a map you pass, or the project\'s: every lane open end to end, spawns, structures and camps reachable, nothing out of bounds, the declared symmetry respected. action "set" stores an edited map document (refused while it has errors, unless force). action "get" returns the current map and its report. The scenery kit dresses walls and bushes with the bound models. 0 credits.',
+    'Generate, dress, check and set the map of a MOBA project',
+    'The map of a moba project as a gameplay plan: bounds, team bases and spawns, 1 to 5 lanes (the minions\' paths), structure slots (towers, inhibitors, nexus), jungle zones and camp slots, objective zones, the divider (river: walkable; chasm, lava, void: crossed only at bridges), crossings, bush zones, walls, camera limits and symmetry. action "generate" builds a fair map (mirrored through the centre) from lanes, divider, size, team_size, camps_per_jungle, objectives, bushes, walls and returns it with a playability report; apply: true puts it in the project (moba_maps, the match\'s map and team size, the camera turn). action "validate" checks a map you pass, or the project\'s: every lane open end to end, spawns, structures and camps reachable, nothing out of bounds, the declared symmetry respected. action "set" stores an edited map document (refused while it has errors, unless force). action "get" returns the current map and its report. New maps default to style {theme: "sanctum", detail: "high", seed: 11, relief: "landscape"}. action "dress" previews a reusable procedural finish for the current map: jungle plateaus, river banks and paved fords, terraced bases, walkable staircases, carved structures, clustered forests, stone guardians and lilies; apply: true saves only the map document, keeping its lane layout and camera configuration; relief updates the shared terrain mesh, ground queries and stair collisions; landscape is the default, terraced keeps base terraces only, flat keeps a level arena. Themes: sanctum, wildwood, ashen; detail: low, medium, high; seed makes the finish repeatable. Bound Library models and textures take precedence. The scenery kit dresses walls and bushes with the bound models. 0 credits.',
     {
       project_id: projectId,
-      action: schema.enum(['get', 'generate', 'validate', 'set']).optional().describe('Default: get.'),
+      action: schema.enum(['get', 'generate', 'dress', 'validate', 'set']).optional().describe('Default: get. dress previews a finish for the existing map, without rebuilding its layout; apply: true saves it.'),
+      style: schema.object({
+        relief: schema.enum(['landscape', 'terraced', 'flat']).optional().describe('Default landscape: jungle plateaus, river banks and terraced gardens; shared terrain mesh, physics and unit heights. terraced keeps only the gardens; flat keeps a level map.'),
+        theme: schema.enum(['sanctum', 'wildwood', 'ashen']).optional().describe('sanctum: pale carved stone, gold, contrasting groves and lilies; wildwood: mossy forest; ashen: weathered volcanic stone. Default: sanctum.'),
+        detail: schema.enum(['low', 'medium', 'high']).optional().describe('Procedural decoration budget, default high. Navigation is identical at all levels.'),
+        seed: schema.number().int().min(0).max(2147483646).optional().describe('Repeatable finish, default 11.'),
+      }).strict().optional().describe('generate / dress: art direction stored with the map. Paved lanes, inset seals, bevelled stone borders, banks, plants, lilies and entrance lights. Bound Library models and textures take precedence.'),
       lanes: schema.number().int().min(1).max(5).optional().describe('generate: number of lanes (default 3).'),
       divider: schema.enum(['river', 'chasm', 'lava', 'void', 'none']).optional().describe('generate: what separates the halves (default river).'),
       size: schema.number().min(100).max(400).optional().describe('generate: side of the square map in metres.'),
@@ -537,7 +543,7 @@ export function registerGameKitTools(
       walls: schema.boolean().optional().describe('generate: rock walls behind the camps (default true).'),
       id: schema.string().max(41).optional().describe('generate: id of the new map (lowercase, digits, _).'),
       name: schema.string().max(80).optional().describe('generate: display name of the map.'),
-      apply: schema.boolean().optional().describe('generate: store the map and make the project play it.'),
+      apply: schema.boolean().optional().describe('generate / dress: store the result in the project (default: preview only).'),
       map: schema.record(schema.string(), schema.unknown()).optional().describe('validate / set: a full map document.'),
       force: schema.boolean().optional().describe('set: store a map that has errors.'),
     },

@@ -3,6 +3,7 @@
 // alongside v3, so existing stdio tools can retain their current v3 schemas.
 import { z } from 'zod/v4';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { LOOK_DESCRIPTION, LOOK_VALUES } from './look.js';
 
 export type VfxProjectRegister = (name: string, config: { title: string; description: string; inputSchema: z.ZodRawShape; annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } }, callback: (args: Record<string, unknown>, extra?: { signal?: AbortSignal }) => Promise<CallToolResult>) => void;
 
@@ -60,6 +61,6 @@ export function registerVfxProjectTools(register: VfxProjectRegister, options: {
     (args, extra) => api(`/${args.id}/promote`, args, 'POST', extra?.signal));
   tool('gripforge_vfx_project_generate', 'Create, render and refine a custom VFX',
     'Text/image -> durable generation job -> original geometry/shaders -> actual GripForge rendering -> visual critique/correction -> workspace work revision. Returns immediately with job_id, status_url and studio_url. Poll gripforge_generation_read, then open its source_url to inspect the saved source and review. Closing the request does not cancel the job. Completed steps survive worker restart. Pass id + expected_revision to refine; image_id must belong to this workspace. A visually rejected candidate never replaces the validated version.',
-    { idempotency_key: schema.string().min(8).max(160).optional(), prompt: schema.string().max(2000).optional(), visual_style: schema.enum(['realistic', 'stylized', 'anime', 'lowpoly']).optional(), image_mode: schema.enum(['spatial', 'animated-artwork']).optional().describe('Default spatial: build a 3D effect. animated-artwork explicitly opts into a flat animated illustration.'), image_id: id.optional(), image_data: schema.string().max(12 * 1024 * 1024).optional(), id: id.optional(), expected_revision: schema.number().int().positive().optional() }, false,
+    { idempotency_key: schema.string().min(8).max(160).optional(), prompt: schema.string().max(2000).optional(), visual_style: schema.enum(LOOK_VALUES).optional().describe('Rendering look of the effect (same vocabulary as look). Default stylized.'), look: schema.enum(LOOK_VALUES).optional().describe(LOOK_DESCRIPTION), image_mode: schema.enum(['spatial', 'animated-artwork']).optional().describe('Default spatial: build a 3D effect. animated-artwork explicitly opts into a flat animated illustration.'), image_id: id.optional(), image_data: schema.string().max(12 * 1024 * 1024).optional(), id: id.optional(), expected_revision: schema.number().int().positive().optional() }, false,
     (args, extra) => api('/generate', args, 'POST', extra?.signal), true);
 }

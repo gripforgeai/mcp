@@ -1,14 +1,72 @@
-name: Publier au registre MCP
+name: Publier sur npm et au registre MCP
 
-# L'authentification OIDC parle au nom du dépôt : elle donne le droit de publier
-# sous `io.github.gripforgeai/*` sans dépendre de la politique OAuth de l'organisation.
+# Ce fichier vit dans le dépôt privé (tools/release/mcp-public/publish.yml) et arrive ici avec chaque
+# version : le dépôt privé pousse le paquet sur main, ce workflow le publie sur npm s'il n'y est pas,
+# puis au registre MCP. Personne ne tape de commande.
+#
+# npm : « trusted publishing » (OIDC) — le paquet @gripforgeai/mcp déclare ce dépôt et ce fichier comme
+# éditeur de confiance sur npmjs.com, aucun jeton n'est stocké. Un secret NPM_TOKEN, s'il existe, sert à la place.
+# Registre MCP : l'authentification OIDC parle au nom du dépôt, elle donne le droit de publier sous
+# `io.github.gripforgeai/*` sans dépendre de la politique OAuth de l'organisation.
 on:
+  push:
+    branches: [main]
+    paths: [package.json]
   workflow_dispatch:
   release:
     types: [published]
 
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
-  publish:
+  npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: La version est-elle déjà sur npm ?
+        id: check
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION est déjà sur npm : rien à publier."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Installer et construire
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          npm install -g npm@latest
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Publier sur npm (éditeur de confiance)
+        if: steps.check.outputs.needed == 'true' && env.HAS_NPM_TOKEN != 'true'
+        run: npm publish --access public
+
+      - name: Publier sur npm (jeton)
+        if: steps.check.outputs.needed == 'true' && env.HAS_NPM_TOKEN == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+  registry:
+    needs: npm
     runs-on: ubuntu-latest
     permissions:
       contents: read
