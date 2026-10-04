@@ -18,6 +18,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_game_engine',
   'gripforge_game_content',
   'gripforge_game_play_url',
+  'gripforge_game_web_export',
   'gripforge_moba_roster',
   'gripforge_ability_vfx',
   'gripforge_moba_map',
@@ -125,6 +126,15 @@ export function registerGameKitTools(
     for (const k of ['project_id', 'id', 'action', 'confirm', ...drop]) delete out[k];
     return out;
   };
+
+  tool(
+    'gripforge_game_web_export',
+    'Prepare a standalone local web game',
+    'Prepare a download manifest for an existing web Game Kit project in the current workspace. Reuses the same player and HUD as hosted play, compiles only installed enabled kit runtimes, and lists the game configuration, static resources and Library assets to download. Does not publish the project or change its visibility. The hosted MCP cannot write local files: use gripforge game-export <project_id> <folder> locally, then npm run dev. The CLI verifies downloads and preserves local edits on updates (--check previews conflicts; --force backs up and replaces edits only when authorized). The delivered versions remain fixed until an explicit export update. Legacy kits and unpublished source overlays cannot be exported. net.* kits still need their online services. 0 credits.',
+    { project_id: projectId },
+    { readOnly: false },
+    (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/export/web`, body(args), 'POST', extra?.signal),
+  );
 
   tool(
     'gripforge_gamekit_search',
