@@ -80,6 +80,18 @@ jobs:
             | tar xz mcp-publisher
           sudo mv mcp-publisher /usr/local/bin/
 
+      - name: Attendre que npm serve la version
+        run: |
+          # npm met quelques minutes à servir une version qui vient d'être publiée ; le registre MCP la vérifie.
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          for i in $(seq 1 40); do
+            if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then echo "$NAME@$VERSION est servi par npm."; exit 0; fi
+            sleep 15
+          done
+          echo "::error::$NAME@$VERSION n'est toujours pas servi par npm après 10 minutes."
+          exit 1
+
       - name: Vérifier le manifeste
         run: mcp-publisher validate
 
