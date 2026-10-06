@@ -1,14 +1,16 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readdir, realpath } from 'node:fs/promises';
+import { mkdir, readdir, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { GameImportAgent, confinedFile, saveImportJob } from './game-import-agent.js';
+import { GameImportAgent, confinedFile, saveImportJob, jobDirectory } from './game-import-agent.js';
 import type { ImportJob } from './game-import-types.js';
 const exec = promisify(execFile);
 /** Explicit adapters; never execute a binary discovered inside the source game. */
 export async function extractGame(job: ImportJob) {
   const e = job.extraction; if (!e || !job.rights || !job.report) throw Error('Extraction plan and authorized rights basis required');
   if (job.report.engine.name !== 'unity') throw Error('This adapter only handles Unity. Use the existing Unreal source-project exporter for Unreal.');
+  // Preserve the original discovery graph before an extractor replaces the active inventory.
+  await writeFile(join(jobDirectory(job.id), 'source-report.json'), JSON.stringify(job.report, null, 2), { flag: 'wx', mode: 0o600 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
   await mkdir(e.output,{recursive:true,mode:0o700});
   const agent=new GameImportAgent(job); await agent.checkpoint();
   if(!e.completed){

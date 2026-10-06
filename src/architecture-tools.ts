@@ -8,6 +8,15 @@ export const ARCHITECTURE_TOOL_NAMES = ['gripforge_architecture_schema', 'gripfo
 export function registerArchitectureTools(register: VfxProjectRegister, options: { apiUrl: string; getApiKey: () => string | null | undefined }, schema: typeof z = z) {
   const identifier = schema.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,159}$/);
   const ref = schema.object({ assetId: identifier, revisionId: identifier, fileRole: identifier.optional() }).strict();
+  const point = schema.tuple([schema.number().min(-150).max(150), schema.number().min(-150).max(150), schema.number().min(-150).max(150)]);
+  const finishMaterial = { id: schema.string().regex(/^[a-zA-Z0-9_-]{1,48}$/), color: schema.string().regex(/^#[0-9a-f]{6}$/i), roughness: schema.number().min(.05).max(1).optional(), metalness: schema.number().min(0).max(1).optional() };
+  const finish = schema.object({ version: schema.literal(1),
+    remove: schema.array(schema.object({ center: point, size: schema.tuple([schema.number().min(.001).max(100), schema.number().min(.001).max(100), schema.number().min(.001).max(100)]), rotation: schema.tuple([schema.number().min(-Math.PI*2).max(Math.PI*2), schema.number().min(-Math.PI*2).max(Math.PI*2), schema.number().min(-Math.PI*2).max(Math.PI*2)]).optional() }).strict()).max(64),
+    parts: schema.array(schema.discriminatedUnion('kind', [
+      schema.object({ kind: schema.literal('shutter'), ...finishMaterial, origin: point, yaw: schema.number().min(-Math.PI*2).max(Math.PI*2).optional(), width: schema.number().min(.2).max(15), height: schema.number().min(.1).max(12), slatHeight: schema.number().min(.035).max(.3).optional() }).strict(),
+      schema.object({ kind: schema.literal('railing'), ...finishMaterial, points: schema.array(point).min(2).max(16), height: schema.number().min(.1).max(12), postSpacing: schema.number().min(.2).max(3).optional(), barSpacing: schema.number().min(.05).max(.5).optional(), postRadius: schema.number().min(.015).max(.1).optional(), barRadius: schema.number().min(.006).max(.05).optional(), railRadius: schema.number().min(.01).max(.08).optional() }).strict(),
+    ])).min(1).max(32),
+  }).strict().describe('Free deterministic repair of an owned source + delivery. All coordinates are Y-up metres AFTER the returned importTransform. Explicit oriented removal boxes (rotation XYZ radians), regular shutters (+Z outward, yaw radians) and railing paths (feet, vertical posts, supports slopes). Measure and review regions first. Applied AFTER each LOD simplification to keep thin parts straight. Textures outside cuts stay byte-identical; removed surfaces are not capped. Triangle targets remain soft. No AI auto-segmentation or collision repair.');
   const building = schema.object({
     id: schema.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$/).optional(),
     name: schema.string().min(1).max(100).optional(), prompt: schema.string().min(3).max(300),
@@ -25,6 +34,7 @@ export function registerArchitectureTools(register: VfxProjectRegister, options:
     meshQuality: schema.object({ geometry: schema.enum(['standard', '2k', '4k']).optional(), texture: schema.enum(['2k', '4k', '8k']).optional() }).strict().optional().describe('Meshy 7.1 quality. Defaults standard geometry and 2K PBR. Multi-image supports standard/2k geometry only. Texture resolution is preserved during optimization. Read the updated quote.'),
     delivery: schema.object({ lods: schema.array(schema.object({ triangles: schema.number().int().min(1000).max(200000), textureSize: schema.union([schema.literal(1024), schema.literal(2048), schema.literal(4096), schema.literal(8192)]), maxError: schema.number().min(0).max(.02).optional(), lockBorder: schema.boolean().optional() }).strict()).min(1).max(3) }).strict().optional().describe('Preserve an immutable full-detail source without provider remeshing, then prepare 1–3 independent LOD GLBs. Highest detail first, decreasing triangles and texture sizes. Default maxError=.001, lockBorder=true prioritizes detail and may exceed targets. For distant levels, explicitly allow e.g. maxError=.005/.01 and lockBorder=false after review. Shared metric fit and preserved PBR. No normal rebake, runtime LOD switching or inferred collision. Also works with source at no provider cost.'),
     source: ref.optional().describe('Reuse an owned static GLB revision instead of paying for this building. The source is never modified.'),
+    finish: finish.optional(),
   }).strict();
   const material = schema.record(schema.string(), schema.unknown()).describe('SceneMaterialOverride: color, roughness, metalness, map/normalMap/roughnessMap/metalnessMap as owned immutable SceneAssetRef, repeat:[u,v]. Validated by the shared Scene Engine.');
   const district = schema.object({
