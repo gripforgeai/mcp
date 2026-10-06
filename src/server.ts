@@ -32,6 +32,8 @@ import { registerGameKitLocalTools } from './gamekit-deliver-local.js';
 import { registerMapUnrealLocalTools } from './map-unreal-local.js';
 import { registerMapUnrealImportLocalTools } from './map-unreal-import-local.js';
 import { registerMapUnrealExportLocalTools } from './map-unreal-export-local.js';
+import { registerReverseTools } from './game-import-reverse.js';
+import { registerGameImportTools } from './game-import-tools.js';
 
 const API_URL = process.env.GRIPFORGE_API_URL ?? 'https://gripforge.ai';
 const API_KEY = process.env.GRIPFORGE_API_KEY;
@@ -48,6 +50,8 @@ registerGameKitLocalTools((server as unknown as { registerTool: VfxProjectRegist
 registerMapUnrealLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerMapUnrealImportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerMapUnrealExportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerReverseTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
+registerGameImportTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerJoystickTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerAbilityTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerCreatureRigTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });

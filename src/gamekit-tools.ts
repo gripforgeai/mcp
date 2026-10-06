@@ -2,6 +2,7 @@
 import { z } from 'zod/v4';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { VfxProjectRegister } from './vfx-project-tools.js';
+import { LOOK_VALUES, LOOK_DESCRIPTION } from './look.js';
 
 export const GAMEKIT_TOOL_NAMES = [
   'gripforge_gamekit_search',
@@ -15,6 +16,8 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_gamekit_deliver',
   'gripforge_game_capabilities',
   'gripforge_game_project',
+  'gripforge_game_art_direction',
+  'gripforge_game_asset_plan',
   'gripforge_gamekit_creatures',
   'gripforge_game_engine',
   'gripforge_game_content',
@@ -401,6 +404,48 @@ export function registerGameKitTools(
       api(`gamekit-projects/${enc(args.project_id)}/capabilities`, args, 'GET', extra?.signal, {
         goal: typeof args.goal === 'string' ? args.goal : undefined,
       }),
+  );
+
+  tool(
+    'gripforge_game_art_direction',
+    'Read or update the shared art direction of a game',
+    'Store artistic intent on the existing Game Kit project (game.engine), separately from gameplay: look, world/theme, palette, proportions/materials/lighting notes and device budget. Read first, then set with expected_revision. Unspecified fields are preserved; null clears a field or the profile. Existing assets and rendering are not modified. Use this direction with map wizard.look, VFX look, asset prompts, lighting and UI tools, then inspect gripforge_game_asset_plan and actual-engine captures. 0 credits.',
+    {
+      project_id: projectId,
+      action: schema.enum(['get', 'set']).describe('get reads the profile/revision; set applies a partial profile update.'),
+      expected_revision: schema.number().int().positive().optional().describe('set: revision returned by get; stale changes are refused.'),
+      art_direction: schema.object({
+        look: schema.enum(LOOK_VALUES).nullable().optional().describe(LOOK_DESCRIPTION),
+        theme: schema.string().max(120).nullable().optional(),
+        palette: schema.array(schema.string().regex(/^#[a-f\d]{6}$/i)).max(12).nullable().optional(),
+        notes: schema.string().max(1600).nullable().optional(),
+        device: schema.enum(['mobile', 'desktop']).nullable().optional(),
+      }).strict().nullable().optional().describe('set: shared project art direction patch. Null clears the profile or an individual field.'),
+    },
+    { readOnly: false },
+    (args, extra) => {
+      const path = `gamekit-projects/${enc(args.project_id)}/art-direction`;
+      if (args.action === 'get') return api(path, args, 'GET', extra?.signal);
+      if (args.art_direction === undefined || args.expected_revision === undefined) return Promise.resolve(fail('set needs art_direction and expected_revision from get.'));
+      return api(path, { workspace_id: args.workspace_id, artDirection: args.art_direction, expected_revision: args.expected_revision }, 'PATCH', extra?.signal);
+    },
+  );
+
+  tool(
+    'gripforge_game_asset_plan',
+    'Audit project asset roles or search compatible candidates',
+    'Read asset requirements from enabled Game Kits and game.engine archetypes. Without slot: report missing files/bindings, template defaults, metadata style/theme conflicts, unknown classifications and technical ranking concerns. With slot: search accessible Library/Community candidates for that role and the saved art direction; known visual conflicts are excluded. No purchase, generation or binding. Metadata checks do not replace visual/animation/gameplay review in the actual engine. 0 credits.',
+    {
+      project_id: projectId,
+      slot: schema.string().max(160).optional().describe('Omit for the audit; pass a role id from the audit to search candidates.'),
+      q: schema.string().max(400).optional().describe('Optional candidate search terms for this slot.'),
+      source: schema.enum(['all', 'workspace', 'community']).optional().describe('Search scope; default all accessible assets.'),
+      limit: schema.number().int().min(1).max(48).optional().describe('Maximum candidates, default 12.'),
+    },
+    { readOnly: true },
+    (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/assets`, args, 'GET', extra?.signal, {
+      slot: args.slot as string | undefined, q: args.q as string | undefined, source: args.source as string | undefined, limit: args.limit as number | undefined,
+    }),
   );
 
   tool(
