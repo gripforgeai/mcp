@@ -15,16 +15,46 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_gamekit_deliver',
   'gripforge_game_capabilities',
   'gripforge_game_project',
+  'gripforge_gamekit_creatures',
   'gripforge_game_engine',
   'gripforge_game_content',
   'gripforge_game_play_url',
   'gripforge_game_test',
+  'gripforge_game_audit',
   'gripforge_game_web_export',
   'gripforge_moba_roster',
   'gripforge_ability_vfx',
   'gripforge_moba_map',
   'gripforge_terrain_map_use',
 ] as const;
+
+/**
+ * Where each tool stands in the making of a game, appended to its description: when to call it, and the audit it
+ * leads to. One table, so the journey reads the same from every tool — and one place to change it.
+ */
+export const TOOL_JOURNEY: Record<string, string> = {
+  gripforge_gamekit_search: 'Journey — first: find the preset of the genre. Its `done` says what a finished game of that genre has beyond the request, and gripforge_game_audit checks it at the end.',
+  gripforge_gamekit_installed: 'Journey — first on an existing project; gripforge_game_audit then says what stands between it and a finished game.',
+  gripforge_gamekit_install: 'Journey — while composing. A kit installed and left empty is not done (audio.core without a sound, ui.endscreen without an end condition): gripforge_game_audit names them.',
+  gripforge_gamekit_configure: 'Journey — while composing, and to fix what gripforge_game_audit reports (its defects carry the exact config to write).',
+  gripforge_game_capabilities: 'Journey — while composing; gripforge_game_audit includes this report, with the creatures, the controls, the playtest and the definition of done of the genre.',
+  gripforge_game_project: 'Journey — create, then bind a model to every creature slot (get carries the creatures report) and set the controls: action=controls applies the control scheme of the gameplay, a proposal to adapt. Before telling the user the game is done: gripforge_game_audit.',
+  gripforge_gamekit_creatures: 'Journey — right after creating or binding: no unit stays a capsule, every model gets its movement and action clips. gripforge_game_audit folds this report with the rest and applies the free steps with fix=true.',
+  gripforge_game_engine: 'Journey — the build order of the content; its last step is gripforge_game_audit, not "it loads".',
+  gripforge_game_content: 'Journey — the content of the game. Once written, gripforge_game_audit says what a finished game of the genre still lacks (a quest, a way to win and to lose, dialogues…).',
+  gripforge_game_test: 'Journey — after each change. A playtest that passes is not a finished game: gripforge_game_audit (playtest="run" runs this test) gives the verdict and everything the tester cannot see.',
+  gripforge_game_play_url: 'Journey — to look at the running game. Share it as finished only when gripforge_game_audit says complete; otherwise say what is left.',
+  gripforge_game_web_export: 'Journey — last. Run gripforge_game_audit first: export a game whose verdict is complete, or tell the user what is left.',
+  gripforge_gamekit_deliver: 'Journey — last. Run gripforge_game_audit first: deliver a game whose verdict is complete, or tell the user what is left.',
+  gripforge_moba_roster: 'Journey — a MOBA needs distinct heroes; then gripforge_game_audit for the minions, towers, jungle monsters and the rest of a finished MOBA.',
+  gripforge_ability_vfx: 'Journey — after the roster; gripforge_game_audit lists it among what a finished MOBA has.',
+};
+
+/** The tool's place in the journey, then its description (whose closing credit rule stays last). */
+function withJourney(name: string, description: string): string {
+  const journey = TOOL_JOURNEY[name];
+  return journey ? `${journey} ${description}` : description;
+}
 
 const enc = (v: unknown) => encodeURIComponent(String(v));
 
@@ -61,6 +91,7 @@ export function registerGameKitTools(
     method: string,
     signal?: AbortSignal,
     query?: Record<string, string | number | boolean | undefined>,
+    timeoutMs = 120_000,
   ): Promise<CallToolResult> {
     const key = options.getApiKey();
     if (!key) return { isError: true, content: [{ type: 'text', text: 'GripForge API key required.' }] };
@@ -82,7 +113,7 @@ export function registerGameKitTools(
           ...(typeof workspace_id === 'string' ? { 'x-workspace-id': workspace_id } : {}),
         },
         ...(method === 'GET' || method === 'DELETE' ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]),
+        signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]),
       });
       const data = (await res.json()) as Record<string, unknown>;
       return {
@@ -107,7 +138,7 @@ export function registerGameKitTools(
       name,
       {
         title,
-        description,
+        description: withJourney(name, description),
         inputSchema: { ...inputSchema, ...workspace },
         annotations: {
           readOnlyHint: opts.readOnly,
@@ -374,20 +405,25 @@ export function registerGameKitTools(
 
   tool(
     'gripforge_game_project',
-    'List, create, read, bind, feed or delete Game Kit projects',
-    'Manage Game Kit projects (gkp_…): the container holding installed kits, their lockfile, asset bindings and data collections. action=list lists the workspace projects; create needs name and takes a preset (see gripforge_gamekit_search; adventure is the reference game of game.engine) or an explicit kits map — every new project gets game.engine first (the engine of the game: scenes, archetypes, scripts, life cycle; its answer carries the engine start pack { structure, scene, blocks, order, next, rules } and added, the kits installed for dependencies), then the default kits ui.menu (title / pause / options / load and save screen), input.remap (key remapping), settings.graphics (graphics options), ui.prompts (on-screen key prompts that follow remapping and the gamepad), ui.endscreen (end screen and credits), save.persistence (save slots, quick save, autosave), audio.core (game audio: mixer, music, effects, event → sound table), i18n.text (game texts in the player’s language: translation tables in the translations collection, ICU plurals) ui.theme (the design of every interface as kit config: colours, font, shapes, key glyphs; unset = built-in look) and input.virtualpad (the on-screen gamepad of touch screens, mode auto: shown on a touch screen without a gamepad, Touch controls tab), addedBy default: keep and configure them, leave one out ({ "ui.menu": false }) or remove it only if the user asks; get returns the full ProjectDetail (installed kits, bindings, capabilities, missing, playUrl); bind maps asset slots to Library items (lib_…, null to clear); data reads a collection or upserts / removes documents validated against the kits’ schemas (replace=true swaps the whole collection); delete needs confirm=true. Call this first to create or pick the project, then gripforge_gamekit_installed (existing project) or gripforge_gamekit_install. 0 credits.',
+    'List, create, read, bind, feed, set the controls of or delete Game Kit projects',
+    'Manage Game Kit projects (gkp_…): the container holding installed kits, their lockfile, asset bindings and data collections. action=list lists the workspace projects; create needs name and takes a preset (see gripforge_gamekit_search; adventure is the reference game of game.engine) or an explicit kits map — every new project gets game.engine first (the engine of the game: scenes, archetypes, scripts, life cycle; its answer carries the engine start pack { structure, scene, blocks, order, next, rules } and added, the kits installed for dependencies), then the default kits ui.menu (title / pause / options / load and save screen), input.remap (key remapping), settings.graphics (graphics options), ui.prompts (on-screen key prompts that follow remapping and the gamepad), ui.endscreen (end screen and credits), save.persistence (save slots, quick save, autosave), audio.core (game audio: mixer, music, effects, event → sound table), i18n.text (game texts in the player’s language: translation tables in the translations collection, ICU plurals) ui.theme (the design of every interface as kit config: colours, font, shapes, key glyphs; unset = built-in look) and input.virtualpad (the on-screen gamepad of touch screens, mode auto: shown on a touch screen without a gamepad, Touch controls tab), addedBy default: keep and configure them, leave one out ({ "ui.menu": false }) or remove it only if the user asks; get returns the full ProjectDetail (installed kits, bindings, capabilities, missing, playUrl); bind maps asset slots to Library items (lib_…, null to clear); data reads a collection or upserts / removes documents validated against the kits’ schemas (replace=true swaps the whole collection); controls reads or sets the controls: without scheme it returns the control schemes of the catalogue (fps, third_person, moba_click, top_down, platformer, fighting, vehicle, rts, point_click: movement by keys or by click, what the mouse is for, expected actions and keys, touch layout), the project scheme, the one its kits suggest, every action with its effective key and the keys two actions share in one mode (warnings with a proposed reassignment, never a refusal — also in get → report.controls); with scheme and dry_run=true it returns the diff of keys the scheme would write; with scheme alone it applies it (input.actions overrides marked source: scheme, the touch layout of input.virtualpad, the help bar of ui.prompts). A scheme is a starting proposal: a preset applies its own at creation (create takes controls to pick another one, or none), and any key stays changeable with gripforge_gamekit_configure input.actions { overrides: [{ action, keys, buttons?, disabled? }] } — the action of any kit; those entries always win over the scheme. delete needs confirm=true. Call this first to create or pick the project, then gripforge_gamekit_installed (existing project) or gripforge_gamekit_install. 0 credits.',
     {
-      action: schema.enum(['list', 'create', 'get', 'bind', 'data', 'delete']).describe('list | create | get | bind | data | delete.'),
-      project_id: projectId.optional().describe('Game Kit project id (gkp_…). Required for get, bind, data and delete.'),
+      action: schema.enum(['list', 'create', 'get', 'bind', 'data', 'controls', 'delete']).describe('list | create | get | bind | data | controls | delete.'),
+      project_id: projectId.optional().describe('Game Kit project id (gkp_…). Required for get, bind, data, controls and delete.'),
       name: schema.string().min(1).max(120).optional().describe('create: project name.'),
       preset: schema.string().max(80).optional().describe('create: preset id whose default kits are installed (gripforge_gamekit_search returns presets).'),
       kits: schema.record(schema.string(), schema.boolean()).optional().describe('create: explicit kit toggles { "vehicle.driveable": true, … } on top of the preset. Unchecking a required kit fails with toggle_requires. The default kits (ui.menu, input.remap, settings.graphics, ui.prompts, ui.endscreen, save.persistence, audio.core, i18n.text, ui.theme, input.virtualpad) are included unless set to false here — only when the user asked for it.'),
       target: schema.enum(['web', 'godot', 'unity', 'unreal']).optional().describe('create: pass the confirmed engine explicitly (Three.js=web). Ask the user to choose Unity / Godot / Unreal Engine / Three.js before creating if unknown. API default web is for compatibility, not an engine choice.'),
-      bindings: schema.record(schema.string(), schema.string().nullable()).optional().describe('bind: { slot: lib_… | null } — Library item per asset slot declared by the installed kits, null clears.'),
+      bindings: schema.record(schema.string(), schema.string().nullable()).optional().describe('bind: { slot: lib_… | null } — Library item per asset slot declared by the installed kits, null clears. A model bound to a creature slot gets its animations by itself as far as that is free (the answer carries the chain in creatures); see gripforge_gamekit_creatures.'),
       collection: schema.string().max(80).optional().describe('data: collection name declared by an installed kit (e.g. missions, npcs, zones).'),
       documents: schema.array(schema.record(schema.string(), schema.unknown())).max(500).optional().describe('data: documents to upsert (each with its id), validated against the kit schema.'),
       remove: schema.array(schema.string().max(120)).max(500).optional().describe('data: document ids to remove.'),
       replace: schema.boolean().optional().describe('data: true to replace the whole collection with documents.'),
+      scheme: schema.string().max(40).optional().describe('controls: the control scheme to show (dry_run) or apply — fps, third_person, moba_click, top_down, platformer, fighting, vehicle, rts, point_click. Omit to read the schemes and the project controls.'),
+      dry_run: schema.boolean().optional().describe('controls: true returns the diff of keys without writing.'),
+      force: schema.boolean().optional().describe('controls: also replace a touch layout or a help bar the game edited (kept by default).'),
+      reset: schema.boolean().optional().describe('controls: also drop the key overrides the game wrote itself (kept by default), so the game ends exactly on the scheme — what a game made before the schemes needs to move to one. Preview with dry_run.'),
+      controls: schema.string().max(40).optional().describe('create: control scheme applied at creation instead of the preset’s own (or of the one the kits suggest); none keeps the kits’ own keys.'),
       confirm: schema.boolean().optional().describe('delete: must be true. The project, its revisions and data are removed.'),
     },
     { readOnly: false },
@@ -396,11 +432,12 @@ export function registerGameKitTools(
       if (action === 'list') return api('gamekit-projects', args, 'GET', extra?.signal);
       if (action === 'create') {
         if (typeof args.name !== 'string' || !args.name.trim()) return Promise.resolve(fail('create needs name.'));
-        return api('gamekit-projects', body(args, 'bindings', 'collection', 'documents', 'remove', 'replace'), 'POST', extra?.signal);
+        return api('gamekit-projects', body(args, 'bindings', 'collection', 'documents', 'remove', 'replace', 'scheme', 'dry_run', 'force', 'reset'), 'POST', extra?.signal);
       }
       if (typeof args.project_id !== 'string') return Promise.resolve(fail(`${action} needs project_id (gkp_…).`));
       const project = enc(args.project_id);
-      if (action === 'get') return api(`gamekit-projects/${project}`, args, 'GET', extra?.signal);
+      // creatures=1: the answer carries ranked models for every creature slot that would draw a capsule.
+      if (action === 'get') return api(`gamekit-projects/${project}`, args, 'GET', extra?.signal, { creatures: 1 });
       if (action === 'bind') {
         if (!args.bindings || typeof args.bindings !== 'object') return Promise.resolve(fail('bind needs bindings { slot: lib_… | null }.'));
         return api(`gamekit-projects/${project}/bindings`, { workspace_id: args.workspace_id, bindings: args.bindings }, 'PATCH', extra?.signal);
@@ -416,11 +453,46 @@ export function registerGameKitTools(
           extra?.signal,
         );
       }
+      if (action === 'controls') {
+        if (typeof args.scheme === 'string' && args.scheme) {
+          return api(`gamekit-projects/${project}/controls`, { workspace_id: args.workspace_id, scheme: args.scheme, dry_run: args.dry_run, force: args.force, reset: args.reset }, 'POST', extra?.signal);
+        }
+        return (async () => {
+          const [schemes, current] = await Promise.all([api('gamekits/control-schemes', args, 'GET', extra?.signal), api(`gamekit-projects/${project}/controls`, args, 'GET', extra?.signal)]);
+          if (current.isError) return current;
+          const data = { ...(current.structuredContent as Record<string, unknown>), schemes: (schemes.structuredContent as { schemes?: unknown } | undefined)?.schemes ?? [] };
+          return { structuredContent: data, content: [{ type: 'text' as const, text: JSON.stringify(data) }] };
+        })();
+      }
       if (action === 'delete') {
         if (args.confirm !== true) return Promise.resolve(fail('delete needs confirm=true.'));
         return api(`gamekit-projects/${project}`, args, 'DELETE', extra?.signal, { confirm: 1 });
       }
       return Promise.resolve(fail(`Unknown action ${action}.`));
+    },
+  );
+
+  tool(
+    'gripforge_gamekit_creatures',
+    'Creatures of a project: a model and its animations for every unit',
+    'The living units of a Game Kit project (gkp_…) — player, heroes, enemies, bosses, minions, monsters, NPCs: the creature slots its kits declare. Two rules: NO creature ships as a capsule, and a model ships WITH its animations (movement AND action). action=report (default): every creature slot with its status (bound | fallback = a capsule in game), the model bound, the clips the slot plays (locomotion, action), the ones the model lacks, and its chain (steps: clone | rig | animate | more_clips, each done / running / proposed with its tool, free or its credits). action=propose: ranked Library models for each unbound slot — the workspace first, then the Community — with the reasons of the rank (source, slot and role words, game theme, size, rigged, animated, triangle budget). YOU judge: read the reasons, pick the model that fits the game (any monster beats a capsule), bind it with gripforge_game_project { action: "bind" }; nothing is final, rebind any time. A slot with no proposal at all carries defect creature_no_model: generate a model (paid — quote and ask first), never leave the capsule. action=animate: run the free steps of the chain now for the bound models (a free Community model is copied into the workspace and bound in place of the original; the standard clip pack is retargeted, 0 credits; wait=true waits for the result, else it runs in the background — read report again). action=fill: bind the best free proposal to every unbound creature slot, then animate (what the hosted creation does). Nothing here spends credits: the automatic rig, a priced Community asset and generated motions always come back as proposed steps for you to quote and ask about. Binding a model through gripforge_game_project already starts its chain. 0 credits.',
+    {
+      project_id: projectId,
+      action: schema.enum(['report', 'propose', 'animate', 'fill']).optional().describe('report (default) | propose | animate | fill.'),
+      slot: schema.string().max(80).optional().describe('report / propose: only this creature slot (e.g. enemy_grunt, moba_hero_3).'),
+      slots: schema.array(schema.string().max(120)).max(64).optional().describe('animate: only these slots (slot or slot:variant). Default: every bound creature slot.'),
+      limit: schema.number().int().min(1).max(12).optional().describe('propose: models per slot (default 5).'),
+      wait: schema.boolean().optional().describe('animate / fill: wait for the retargets instead of running them in the background.'),
+      brief: schema.string().max(2000).optional().describe('fill: what the game is about, to rank the models (theme, mood).'),
+    },
+    { readOnly: false },
+    (args, extra) => {
+      const action = typeof args.action === 'string' ? args.action : 'report';
+      const path = `gamekit-projects/${enc(args.project_id)}/creatures`;
+      if (action === 'report' || action === 'propose') {
+        return api(path, args, 'GET', extra?.signal, { propose: action === 'propose' ? 1 : undefined, slot: typeof args.slot === 'string' ? args.slot : undefined, limit: typeof args.limit === 'number' ? args.limit : undefined });
+      }
+      return api(path, { workspace_id: args.workspace_id, action, slots: args.slots, wait: args.wait, brief: args.brief }, 'POST', extra?.signal);
     },
   );
 
@@ -516,6 +588,22 @@ export function registerGameKitTools(
     },
     { readOnly: true },
     (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/playtest`, body(args), 'POST', extra?.signal),
+  );
+
+  tool(
+    'gripforge_game_audit',
+    'Audit a game: what is left before it is finished',
+    'One report of everything that stands between a Game Kit project (gkp_…) and a FINISHED game of its genre — run it before telling the user a game is done, and again after each round of fixes. It aggregates, by severity (blocker / major / minor): creatures (slots drawn as a capsule, models without a skeleton, missing movement or action clips, the animation chain in progress), controls (no control scheme, the suggested one, keys shared by two actions in one mode, playable actions without a key), content (missing capabilities, required slots, the game.engine report), the last headless playtest (failures, warnings, the keys / models / animations probes, capabilities no probe covers) and completeness: what a finished game of the genre has beyond the literal request (MOBA: distinct heroes with Q/W/E/R, minions, towers, jungle monsters, shop, respawn; FPS: weapon, ammo, reload, crosshair, enemies; platformer: checkpoints, collectibles, end of level; racing: laps, ranking, AI opponents… and for every game a way to win AND to lose, title / pause / end screens, sound, a HUD, touch controls), checked against facts of the project, never a declaration. Each defect carries fix { tool, args, note, auto?, credits? }: call it as given. Returns { verdict: complete | playable_with_defects | incomplete, headline, genre, counts, defects, next (ordered calls), sections, text, play_url }. fix=true first applies what is free and safe (the best free Library model on each capsule — rebind at will —, the free standard clips, the suggested control scheme) and reports it in fixes. playtest="run" plays the game headless first (5–20 s); the default reads the last playtest and says when it is stale. Never refuses a write and never spends: paid fixes (a priced model, a rig, a generation) come back with their price to ask the user about. Aim for verdict complete; if you stop before, tell the user exactly what is left. 0 credits.',
+    {
+      project_id: projectId,
+      fix: schema.boolean().optional().describe('true: apply the free and safe fixes first (free models on capsules, standard clips, suggested control scheme), then read. Nothing paid is ever done.'),
+      playtest: schema.enum(['last', 'run']).optional().describe('last (default): read the stored playtest of the project. run: play it headless now, then read.'),
+      brief: schema.string().max(2000).optional().describe('Free words about the game (theme, setting): they weigh in the model proposals.'),
+    },
+    { readOnly: false },
+    (args, extra) => (args.fix === true || args.playtest === 'run'
+      ? api(`gamekit-projects/${enc(args.project_id)}/audit`, body(args), 'POST', extra?.signal, undefined, 280_000)
+      : api(`gamekit-projects/${enc(args.project_id)}/audit`, { workspace_id: args.workspace_id }, 'GET', extra?.signal, { brief: typeof args.brief === 'string' ? args.brief : undefined })),
   );
 
   tool(
