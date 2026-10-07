@@ -2474,18 +2474,20 @@ server.tool(
 
 server.tool(
   'gripforge_loading_page',
-  'Loading overlay for Three/Godot/Unity/Unreal. Title is text. Overlay 0 credits. Pass character_id to generate a 16:9 cinematic still of that Library character (1 credit, no letters in the image).',
+  'Loading overlay for Three/Godot/Unity/Unreal. project_id uses persistent quoted generation: action quote → accept → get → apply, with creation_id and quote_token. Title is text. Overlay 0 credits. Pass character_id to generate a 16:9 cinematic still of that Library character (1 credit, no letters in the image).',
   {
-    prompt: z.string().min(2).max(240).describe('e.g. devil may cry like'),
+    project_id:z.string().optional(), action:z.enum(['quote','accept','get','apply']).optional(), creation_id:z.string().optional(), quote_token:z.string().optional(),
+    prompt: z.string().min(2).max(2000).describe('e.g. devil may cry like'),
     character_id: z.string().optional().describe('lib_… character/enemy/bind — generate background still'),
   },
-  async ({ prompt, character_id }) => {
+  async (args) => {
+    const {prompt,character_id}=args;
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
-    if (character_id) {
+    if (character_id || args.project_id) {
       const res = await fetch(`${API_URL}/api/v1/loading-page`, {
         method: 'POST',
         headers: { ...apiHeaders(), 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt, character_id }),
+        body: JSON.stringify(args),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
