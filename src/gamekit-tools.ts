@@ -162,6 +162,34 @@ export function registerGameKitTools(
     return out;
   };
 
+  tool('gripforge_runtime_sessions', 'Rust runtime sessions',
+    'List live Rust/Bevy previews for an authorized Game Kit project. Open the project Rust player in GripForge first. No server-side solo simulation.',
+    { project_id: projectId }, { readOnly: true },
+    async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/runtime`, args, 'GET', extra?.signal));
+  tool('gripforge_runtime_command', 'Command Rust preview',
+    'Queue a versioned GripForge runtime command for the exact browser session. Use inspect, apply_patch, set_relief (off/pom/spom on configured relief surfaces), step (paused only), run_test, play, pause, reset, load_game, unload_game or get_stats. Returns received; fetch the applied receipt with gripforge_runtime_receipt. Preview changes do not persist the project. Unknown kits/components and invalid fields are refused by the Rust core.',
+    { project_id: projectId, command: schema.record(schema.string(), schema.unknown()) }, { readOnly: false },
+    async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/runtime`, { ...args, action: 'command' }, 'POST', extra?.signal));
+  tool('gripforge_runtime_receipt', 'Read Rust command receipt',
+    'Read received/applied/rejected status for a Rust preview request, including simulation boundary and revisions.',
+    { project_id: projectId, session_id: schema.string().max(96), request_id: schema.string().max(96) }, { readOnly: true },
+    async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/runtime`, args, 'GET', extra?.signal, { session_id: String(args.session_id), request_id: String(args.request_id) }));
+
+  // The same authenticated mailbox and preview-session capability as gameplay.
+  // Do not overload gripforge_apply_realism: that tool edits saved scene data.
+  for (const operation of ['get_render_capabilities', 'configure_render_preview', 'render_preview', 'cancel_render_preview'] as const) {
+    tool(`gripforge_${operation}`, `Bevy neural preview: ${operation}`,
+      'Local optional Bevy neural snapshot, not a saved scene edit. Requires an open authorized browser runtime session. Configure off/preview; realtime_experimental is refused. Trained weights and a local rights manifest must be selected in the browser; none are downloaded. render_preview starts an asynchronous request: read the command receipt, then query get_render_capabilities for actual completion, model, effective resolution, provenance, timings and limitations. Cancellation prevents stale publication. No images are uploaded.',
+      { project_id: projectId, session_id: schema.string().max(96), request_id: schema.string().regex(/^[-\w.]{1,96}$/), expected_revision: schema.number().int().nonnegative(),
+        ...(operation === 'configure_render_preview' ? { mode: schema.enum(['off', 'preview']) } : {}) },
+      { readOnly: operation === 'get_render_capabilities' },
+      async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/runtime`, {
+        ...args, action: 'command', command: { protocol_version: 1, request_id: args.request_id, session_id: args.session_id,
+          project_id: args.project_id, expected_revision: args.expected_revision, scope: 'preview', operation,
+          payload: operation === 'configure_render_preview' ? { mode: args.mode } : {} },
+      }, 'POST', extra?.signal));
+  }
+
   tool(
     'gripforge_game_web_export',
     'Prepare a standalone local web game',
