@@ -6,9 +6,10 @@ export function registerAssetProductionTools(register: VfxProjectRegister, optio
   const origin = options.apiUrl.replace(/\/$/, '');
   const workspace = schema.string().max(100).optional().describe('Authorized workspace; defaults to the connected workspace.');
   const result = (data: Record<string, unknown>) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }], structuredContent: data });
-  async function request(path: string, workspaceId: unknown, method = 'GET', body?: unknown) {
+  async function request(path: string, workspaceId: unknown, method = 'GET', body?: unknown, tool?: string) {
     const key = options.getApiKey(); if (!key) throw Error('GripForge API key required.');
-    const response = await fetch(origin + '/api/v1/' + path, { method, headers: { 'x-api-key': key, 'x-gripforge-client': 'mcp', ...(body ? { 'content-type': 'application/json' } : {}), ...(typeof workspaceId === 'string' ? { 'x-workspace-id': workspaceId } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(60000) });
+    // `x-gripforge-tool` names the calling tool in the server's search log (asset_searches).
+    const response = await fetch(origin + '/api/v1/' + path, { method, headers: { 'x-api-key': key, 'x-gripforge-client': 'mcp', ...(tool ? { 'x-gripforge-tool': tool } : {}), ...(body ? { 'content-type': 'application/json' } : {}), ...(typeof workspaceId === 'string' ? { 'x-workspace-id': workspaceId } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(60000) });
     const data = await response.json() as Record<string, unknown>;
     if (!response.ok) throw Error(String(data.error ?? `HTTP ${response.status}`));
     return data;
@@ -60,7 +61,7 @@ export function registerAssetProductionTools(register: VfxProjectRegister, optio
     if (args.kind) qs.set('kind', String(args.kind));
     const sources = args.source === 'workspace' ? ['workspace'] : args.source === 'community' ? ['community'] : ['workspace','community'];
     const data = await Promise.all(sources.map(async source => {
-      const response = await request(`${source === 'workspace' ? 'library' : 'community'}?${qs}`, args.workspace_id);
+      const response = await request(`${source === 'workspace' ? 'library' : 'community'}?${qs}`, args.workspace_id, 'GET', undefined, 'gripforge_asset_search');
       const items = (Array.isArray(response.items) ? response.items : []).slice(0, limit) as Record<string, unknown>[];
       return { source, total: response.total ?? items.length, items: items.map(item => {
         const meta = (item.meta && typeof item.meta === 'object' ? item.meta : {}) as Record<string, unknown>;
