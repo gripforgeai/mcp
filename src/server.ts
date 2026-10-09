@@ -12,6 +12,7 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { propGripSchema } from './attach-options.js';
 import { registerVfxProjectTools, type VfxProjectRegister } from './vfx-project-tools.js';
 import { registerSceneTools } from './scene-tools.js';
 import { registerServerTools } from './server-tools.js';
@@ -92,6 +93,10 @@ server.tool(
     style: z.enum(['melee', 'gun', 'shield', 'staff']).optional().describe('Grip style (default: guessed from the filename)'),
     hand: z.enum(['right', 'left']).optional().describe('Hand side (default right)'),
     height_ratio: z.number().min(0.05).max(1.5).optional().describe('Prop size as a fraction of body height'),
+    prop_grip: propGripSchema.optional(),
+    style_2: z.enum(['melee', 'gun', 'shield', 'staff']).optional().describe('Style of the second held item'),
+    height_ratio_2: z.number().min(0.05).max(1.5).optional(),
+    prop_grip_2: propGripSchema.optional(),
     fist: z.number().min(0).max(1).optional().describe('Fist closing amount, 0 open → 1 closed (default 1)'),
     grip_offset: z
       .array(z.number())
@@ -111,7 +116,7 @@ server.tool(
       ),
     out_dir: z.string().optional().describe('Write bind.json + engine snippets into this folder'),
   },
-  async ({ character_path, prop_path, character_id, attach_id, prop_id, prop_id_2, prop_path_2, style, hand, height_ratio, fist, grip_offset, ai_refine, export_glb, out_dir }) => {
+  async ({ character_path, prop_path, character_id, attach_id, prop_id, prop_id_2, prop_path_2, style, hand, height_ratio, prop_grip, style_2, height_ratio_2, prop_grip_2, fist, grip_offset, ai_refine, export_glb, out_dir }) => {
     if (!API_KEY) {
       return err(
         'GRIPFORGE_API_KEY missing. Create a free account at ' +
@@ -156,6 +161,7 @@ server.tool(
     if (style) form.append('style', style);
     if (hand) form.append('hand', hand);
     if (height_ratio != null) form.append('ratio', String(height_ratio));
+    if (prop_grip) form.append('prop_grip', JSON.stringify(prop_grip));
     if (fist != null) form.append('fist', String(fist));
     if (grip_offset) form.append('grip_offset', grip_offset.join(','));
     if (ai_refine) form.append('refine', 'ai');
@@ -198,6 +204,9 @@ server.tool(
       form2.append('export', 'glb');
       form2.append('fingers', '1');
       form2.append('hand', hand === 'left' ? 'right' : 'left');
+      if (style_2) form2.append('style', style_2);
+      if (height_ratio_2 != null) form2.append('ratio', String(height_ratio_2));
+      if (prop_grip_2) form2.append('prop_grip', JSON.stringify(prop_grip_2));
       const res2 = await fetch(`${API_URL}/api/v1/attach`, {
         method: 'POST',
         headers: apiHeaders(),
@@ -1474,6 +1483,8 @@ server.tool(
             prop_id: z.string(),
             hand: z.enum(['left', 'right']).optional(),
             style: z.enum(['melee', 'gun', 'shield', 'staff']).optional(),
+            height_ratio: z.number().min(.05).max(1.5).optional(),
+            prop_grip: propGripSchema.optional(),
           }),
         ),
       )
