@@ -35,6 +35,8 @@ const KIT_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 const BACKUP_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 const TARGETS = ['godot', 'unity', 'unreal'] as const;
 type Target = (typeof TARGETS)[number];
+/** `rust` writes nothing in the folder: the tool answers with the native compatibility report of the kits. */
+const LOCAL_TARGETS = [...TARGETS, 'rust'] as const;
 
 type Action =
   | { op: 'backup'; path: string; to: string }
@@ -477,7 +479,7 @@ export function registerGameKitLocalTools(register: VfxProjectRegister, options:
         'npm client only. Deliver Game Kits straight into an engine project folder on this machine: hashes project_dir/gripforge/**, reads gripforge/gamekits.lock.json, asks the GripForge API for the plan, then executes plan.actions with fs — every overwritten or deleted file is copied to gripforge/.backup/<plan id>/ first and the lock is written last. Paths are checked inside project_dir (Godot: gripforge/, assets/gripforge/ and addons/gripforge_gameplay|gripforge_net only) and every hash is verified before anything is written. Run dry_run=true first. A blocked plan (files edited in the project) returns the conflicts without touching files: re-run with force to back them up and overwrite. Kits always deliver at their latest version. verify=true runs Godot headless (import, then each kit smoke.gd) when GODOT_BIN is set. Undo with gripforge_gamekit_rollback_local. Credits: the first delivery of a kit major version to an engine costs 1 credit per workspace; re-deliveries, updates within a major and dry runs are free.',
       inputSchema: {
         project_dir: projectDirField,
-        target: schema.enum(TARGETS).optional().describe('Engine of the project: godot (default), unity or unreal.'),
+        target: schema.enum(LOCAL_TARGETS).optional().describe('Engine of the project: godot (default), unity or unreal. rust (the Rust / Bevy runtime) writes no file: the answer is the native compatibility report — which kits have a Rust module and what blocks the project on the Bevy player.'),
         kits: schema
           .array(
             schema.object({
@@ -504,8 +506,15 @@ export function registerGameKitLocalTools(register: VfxProjectRegister, options:
       let context: Record<string, unknown> = {};
       try {
         const dir = await projectDir(args.project_dir);
+        if (args.target === 'rust') {
+          const kits = Array.isArray(args.kits) ? args.kits : [];
+          if (!kits.length && typeof args.project_id !== 'string') throw new LocalError('bad_request', 'Pass kits [{ id }] or project_id (gkp_…).');
+          context = { project_dir: dir, target: 'rust', dry_run: true };
+          const { status, data } = await callDeliver({ target: 'rust', ...(kits.length ? { kits } : {}), projectId: args.project_id, dryRun: true }, typeof args.workspace_id === 'string' ? args.workspace_id : undefined, extra?.signal);
+          return toolResult({ ...context, ...data, written: [] }, status >= 400);
+        }
         const target = (typeof args.target === 'string' ? args.target : 'godot') as Target;
-        if (!TARGETS.includes(target)) throw new LocalError('bad_request', 'target must be godot, unity or unreal');
+        if (!TARGETS.includes(target)) throw new LocalError('bad_request', 'target must be godot, unity, unreal or rust');
         if (target === 'godot' && !(await isFile(join(dir, 'project.godot')))) throw new LocalError('not_a_project', `${dir} has no project.godot: pass the Godot project folder`);
         const kits = Array.isArray(args.kits) ? args.kits : [];
         const mode = typeof args.mode === 'string' ? args.mode : 'install';
