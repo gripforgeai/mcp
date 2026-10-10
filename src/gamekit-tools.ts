@@ -22,6 +22,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_gamekit_creatures',
   'gripforge_game_engine',
   'gripforge_game_content',
+  'gripforge_game_mods',
   'gripforge_game_play_url',
   'gripforge_game_test',
   'gripforge_game_audit',
@@ -53,6 +54,7 @@ export const TOOL_JOURNEY: Record<string, string> = {
   gripforge_game_project: 'Journey — create, then bind a model to every creature slot (get carries the creatures report) and set the controls: action=controls applies the control scheme of the gameplay, a proposal to adapt. Before telling the user the game is done: gripforge_game_audit.',
   gripforge_gamekit_creatures: 'Journey — right after creating or binding: no unit stays a capsule, every model gets its movement and action clips. gripforge_game_audit folds this report with the rest and applies the free steps with fix=true.',
   gripforge_game_engine: 'Journey — the build order of the content; its last step is gripforge_game_audit, not "it loads".',
+  gripforge_game_mods: 'Journey — while building or after: a packaged way to apply the same extension mechanisms (config, documents, hooks, reactions) as one separable unit — a variant to switch on, content added over the game, a game opened to its players\' mods (an option of the developer). gripforge_game_audit then plays the modded game.',
   gripforge_game_content: 'Journey — the content of the game. Once written, gripforge_game_audit says what a finished game of the genre still lacks (a quest, a way to win and to lose, dialogues…).',
   gripforge_game_test: 'Journey — after each change. A playtest that passes is not a finished game: gripforge_game_audit (playtest="run" runs this test) gives the verdict and everything the tester cannot see.',
   gripforge_game_play_url: 'Journey — to look at the running game. Share it as finished only when gripforge_game_audit says complete; otherwise say what is left.',
@@ -310,11 +312,12 @@ export function registerGameKitTools(
   tool(
     'gripforge_gamekit_configure',
     'Configure an installed Game Kit',
-    'Tune an installed kit: merge config values validated against the kit configSchema (read it with gripforge_gamekit_get), or toggle enabled to switch the kit off without uninstalling it. Configure installed kits freely rather than recoding what they do (game.engine: startScene, startEntry, flow.title, story flags). Switching game.engine off follows the confirmation of a removal: the first call answers 409 confirm_required with details.confirm; send it back with enabled=false after the user agreed — never on your own. Returns { kit, project } with the new project revision. Call this AFTER gripforge_gamekit_install. 0 credits.',
+    'Tune an installed kit: merge config values validated against the kit configSchema (read it with gripforge_gamekit_get), or patch the config as a document (patch: set a nested key, add / change / remove one element of a list without rewriting it), or toggle enabled to switch the kit off without uninstalling it. Configure installed kits freely rather than recoding what they do (game.engine: startScene, startEntry, flow.title, story flags). Switching game.engine off follows the confirmation of a removal: the first call answers 409 confirm_required with details.confirm; send it back with enabled=false after the user agreed — never on your own. Returns { kit, project } with the new project revision. Call this AFTER gripforge_gamekit_install. 0 credits.',
     {
       project_id: projectId,
       id: kitId,
       config,
+      patch: schema.record(schema.string(), schema.unknown()).optional().describe('The config as a document, instead of rewriting a whole list: { set: { "<dotted path>": value }, append: { "<path of a list>": [items] }, update: { "<path>": [{ match: { key: value }, set: { … } }] }, remove: { "<path>": [values or { key: value }] } } — add, change or remove one element of a config list (an item with the id of an element replaces it); a list the project does not write starts from the kit default. Validated against the configSchema like config.'),
       enabled: schema.boolean().optional().describe('false to disable the kit at runtime while keeping it installed; true to re-enable.'),
       confirm: schema.string().max(80).optional().describe('game.engine enabled=false: the confirm token of the previous answer.'),
       reason: schema.string().max(300).optional().describe('One sentence: why you do this, recorded in the project history (required in spirit when you go against the installed-kits rule).'),
@@ -584,11 +587,12 @@ export function registerGameKitTools(
   tool(
     'gripforge_game_engine',
     'The engine of a game: structure, bricks, report, next steps',
-    'Read game.engine of a Game Kit project (gkp_…) — a direction, never a gate. action=start (default): the start pack { version, active, structure { engine, kits, content counts, code }, scene, blocks digest, order (scene → playable → assets → archetypes → story → scripts → ui → validate → deliver → code), next [{ step, tool, args, why }], code (where game code goes per engine), rules } and the full content report. action=blocks: the brick catalogue computed from the manifests — entity kinds, archetype components (kit, schema, example), script verbs (conditions / actions with arguments and shorthand), script sugars (interact, enter, leave, scene, talked, quest, state, gives), quest step types, NPC behaviours, worlds, layers, events, variables; scope=catalog adds the bricks of kits not installed (install <kit>). action=report: { ok, errors, warnings, stats } — an error means that piece is left out of the game (the rest plays), a warning that it loads with something missing; each issue may carry a fix { tool, args }. action=next: the next steps only. A game with everything in code is valid: content first, kits second, code for the rest. 0 credits.',
+    'Read game.engine of a Game Kit project (gkp_…) — a direction, never a gate. action=start (default): the start pack { version, active, structure { engine, kits, content counts, code }, scene, blocks digest, order (scene → playable → assets → archetypes → story → scripts → ui → validate → deliver → code), next [{ step, tool, args, why }], code (where game code goes per engine), rules } and the full content report. action=blocks: the brick catalogue computed from the manifests — entity kinds, archetype components (kit, schema, example), script verbs (conditions / actions with arguments and shorthand), script sugars (interact, enter, leave, scene, talked, quest, state, gives), quest step types, NPC behaviours, worlds, layers, events, variables; scope=catalog adds the bricks of kits not installed (install <kit>). action=points (game.engine 1.3): what can be plugged into the kits without recoding them — without kit, the compact view of every installed kit (hooks with their mutable fields and whether they cancel, events emitted and listened to, registries, collections and config keys with what is moddable or live, settings, verbs, components, services, completeness counters); with kit, the full extension points of that kit with schemas. Look here before writing anything new: the kit or tool that already does it is the proven way, above all for what makes a game complete (input, camera, combat, saving, HUD, menus, sound). The kits are built to be adapted, nothing in them is fixed: adapt one as deep as the game needs through its extension points — its config (gripforge_gamekit_configure), its documents and registries (gripforge_game_content, gripforge_game_project data), taps on its hooks (documents of the hooks collection), scripts whose rules react to its events and change data — in the project, or packaged as a mod (gripforge_game_mods); write something new only when no kit does it, and then as a kit following the extension contract; a local copy of a kit last, saying why. action=report: { ok, errors, warnings, stats } — an error means that piece is left out of the game (the rest plays), a warning that it loads with something missing; each issue may carry a fix { tool, args }. action=next: the next steps only. A game with everything in code is valid: content first, kits second, code for the rest. 0 credits.',
     {
       project_id: projectId,
-      action: schema.enum(['start', 'structure', 'blocks', 'report', 'next']).optional().describe('start (default) | structure | blocks | report | next.'),
+      action: schema.enum(['start', 'structure', 'blocks', 'points', 'report', 'next']).optional().describe('start (default) | structure | blocks | points | report | next.'),
       scope: schema.enum(['installed', 'catalog']).optional().describe('blocks: installed (default) or catalog.'),
+      kit: schema.string().max(64).optional().describe('points: one kit id (installed or not): its full extension points with schemas.'),
       scene: schema.string().max(64).optional().describe('start: also return this scene document.'),
     },
     { readOnly: true },
@@ -596,11 +600,37 @@ export function registerGameKitTools(
       const action = typeof args.action === 'string' ? args.action : 'start';
       const project = enc(args.project_id);
       if (action === 'blocks') return api(`gamekit-projects/${project}/engine/blocks`, args, 'GET', extra?.signal, { scope: typeof args.scope === 'string' ? args.scope : undefined });
+      if (action === 'points') {
+        const res = await api(`gamekit-projects/${project}/engine/blocks`, args, 'GET', extra?.signal, { kit: typeof args.kit === 'string' ? args.kit : undefined });
+        if (res.isError) return res;
+        const picked = { points: (res.structuredContent as { points?: unknown } | undefined)?.points };
+        return { structuredContent: picked as Record<string, unknown>, content: [{ type: 'text', text: JSON.stringify(picked) }] };
+      }
       const res = await api(`gamekit-projects/${project}/engine`, args, 'GET', extra?.signal, { scene: typeof args.scene === 'string' ? args.scene : undefined });
       if (res.isError || action === 'start') return res;
       const data = res.structuredContent as { engine?: Record<string, unknown>; report?: unknown } | undefined;
       const picked = action === 'report' ? { report: data?.report } : action === 'next' ? { next: data?.engine?.next, order: data?.engine?.order } : { structure: data?.engine?.structure, scene: data?.engine?.scene, active: data?.engine?.active };
       return { structuredContent: picked as Record<string, unknown>, content: [{ type: 'text', text: JSON.stringify(picked) }] };
+    },
+  );
+
+  tool(
+    'gripforge_game_mods',
+    'Mods of a game: list, validate, install, enable, order',
+    'The mods of a Game Kit project (gkp_…), docs/mods-engine.md: a mod (gripforge.mod/1) is data applied over the project before the kits mount — config keys and collection documents the kits declare moddable (configPatch by dotted path, data.<collection> { remove, patch, add, order }, hooks documents that tap decisions, scripts whose rules react to events) — whole or not at all, never code. The kits are built to be adapted without recoding them — interceptable (hooks), registrable (registries), modifiable (config, documents, patches) and reactive (rules on events that change data): that is the normal, recommended way to build a game, written in the project (see gripforge_game_engine points) or packaged as a mod. A mod packages those changes as one separable unit: a variant to switch on or off (a hard mode, a season event) without copying the project, content added over the game, and — an option of the developer — a game opened to its players\' mods. action=list (default): the game policy (config.mods of game.engine: enabled, disabled, order, deny), every mod with its status (applied | disabled | refused) and issues ({ level, code, path, message }), the documents each added, the fingerprint the network handshake compares. action=validate { mod }: a dry run — the project with this mod added (or replacing the one with its id), applied as the host would: its status and issues, nothing written. action=install { mod }: writes it to the mods collection (validated against the mod schema). action=remove { id }. action=enable / disable { id }: the policy list mods.disabled. action=order { ids }: these mods first, in this order (a mod always comes after those it depends on). 0 credits.',
+    {
+      project_id: projectId,
+      action: schema.enum(['list', 'validate', 'install', 'remove', 'enable', 'disable', 'order']).optional().describe('list (default) | validate | install | remove | enable | disable | order.'),
+      mod: schema.record(schema.string(), schema.unknown()).optional().describe('validate, install: the gripforge.mod/1 document ({ id, version, requires?, depends?, conflicts?, config?, configPatch?, data? }).'),
+      id: schema.string().max(64).optional().describe('remove, enable, disable: the mod id.'),
+      ids: schema.array(schema.string().max(64)).max(64).optional().describe('order: the mods first, in this order.'),
+    },
+    { readOnly: false },
+    async (args, extra) => {
+      const action = typeof args.action === 'string' ? args.action : 'list';
+      const project = enc(args.project_id);
+      if (action === 'list') return api(`gamekit-projects/${project}/mods`, args, 'GET', extra?.signal);
+      return api(`gamekit-projects/${project}/mods`, { workspace_id: args.workspace_id, action, mod: args.mod, id: args.id, ids: args.ids }, 'POST', extra?.signal);
     },
   );
 
