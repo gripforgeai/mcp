@@ -19,6 +19,7 @@ import { registerServerTools } from './server-tools.js';
 import { registerGameKitTools } from './gamekit-tools.js';
 import { registerJoystickTools } from './joystick-tools.js';
 import { registerAbilityTools } from './ability-tools.js';
+import { registerUiScreenTools } from './ui-screen-tools.js';
 import { registerAssetProductionTools } from './asset-production-tools.js';
 import { registerCreatureRigTools } from './creature-rig-tools.js';
 import { registerWeaponMotionTools } from './weapon-motion-tools.js';
@@ -55,6 +56,7 @@ registerReverseTools((server as unknown as { registerTool: VfxProjectRegister })
 registerGameImportTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerJoystickTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerAbilityTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerUiScreenTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerCreatureRigTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerWeaponMotionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerShieldVfxTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
@@ -809,7 +811,7 @@ server.tool(
   {
     preset: z.literal('survivor').optional().describe('v1: survivor only (default)'),
     health_type: z.enum(['hearts', 'bar']).optional().describe('default hearts'),
-    health_max: z.number().int().min(1).max(20).optional().describe('default 5'),
+    health_max: z.number().int().min(1).max(1000000).optional().describe('default 5'),
     health_style: z.string().optional().describe('hearts skin or bar skin, or custom:<slug> from gripforge_hud_bar'),
     currencies: z.array(z.string()).max(6).optional().describe('default ["gem","mushroom","drop"]'),
     minimap: z.boolean().optional().describe('default false'),
@@ -1435,21 +1437,24 @@ server.tool(
 
 server.tool(
   'gripforge_level',
-  'Plan a playable level from a prompt (0 credits): rooms placed in metres (entrance, combat rooms, junctions, key/lock, boss antechamber + boss room, treasure, secret room), connections, critical path, shortcuts, and gameplay spawns (player/packs/boss/rewards). Same seed → same level. Pair with gripforge_scene_kit for dressing props and gripforge_style_kit for enemies.',
+  'Plan a playable level from a prompt (0 credits): rooms placed in metres (entrance, combat rooms, junctions, key/lock, boss antechamber + boss room, treasure, secret room), connections, critical path, shortcuts, and gameplay spawns (player/packs/boss/rewards). Same seed → same level. target=bevy-coop exports a full 10–12 room modular/navigation plan for the existing Bevy kit. Prepare with tools/dungeon/prepare-expedition.mjs --plan level.json. Quality profiles specify budgets, not measured GPU guarantees. Pair with gripforge_scene_kit for dressing props and gripforge_style_kit for enemies.',
   {
     prompt: z.string().describe('e.g. "gothic castle dungeon, 3 combat rooms, one boss, exploration pacing"'),
     seed: z.number().optional(),
     combat_rooms: z.number().optional(),
     floors: z.number().optional(),
     optional_branches: z.number().optional(),
+    target: z.enum(['plan','bevy-coop']).optional(),
+    room_count: z.number().int().min(10).max(12).optional(),
+    quality: z.enum(['web','desktop','native']).optional(),
     out_dir: z.string().optional().describe('Write level.json here'),
   },
-  async ({ prompt, seed, combat_rooms, floors, optional_branches, out_dir }) => {
+  async ({ prompt, seed, combat_rooms, floors, optional_branches, target, room_count, quality, out_dir }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/level`, {
       method: 'POST',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, seed, combat_rooms, floors, optional_branches }),
+      body: JSON.stringify({ prompt, seed, combat_rooms, floors, optional_branches, target, room_count, quality }),
     });
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) return err(String(data.error ?? res.status));
