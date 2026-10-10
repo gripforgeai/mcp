@@ -29,6 +29,14 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_ability_vfx',
   'gripforge_moba_map',
   'gripforge_terrain_map_use',
+  // The Rust / Bevy preview of a project open in GripForge: its live sessions, commands and receipts, the neural preview.
+  'gripforge_runtime_sessions',
+  'gripforge_runtime_command',
+  'gripforge_runtime_receipt',
+  'gripforge_get_render_capabilities',
+  'gripforge_configure_render_preview',
+  'gripforge_render_preview',
+  'gripforge_cancel_render_preview',
 ] as const;
 
 /**
@@ -162,26 +170,29 @@ export function registerGameKitTools(
     return out;
   };
 
+  const sessionId = schema.string().max(96).describe('A live browser runtime session of the project, as listed by gripforge_runtime_sessions.');
   tool('gripforge_runtime_sessions', 'Rust runtime sessions',
-    'List live Rust/Bevy previews for an authorized Game Kit project. Open the project Rust player in GripForge first. No server-side solo simulation.',
+    'List live Rust/Bevy previews for an authorized Game Kit project. Open the project Rust player in GripForge first. No server-side solo simulation. 0 credits.',
     { project_id: projectId }, { readOnly: true },
     async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/runtime`, args, 'GET', extra?.signal));
   tool('gripforge_runtime_command', 'Command Rust preview',
-    'Queue a versioned GripForge runtime command for the exact browser session. Use inspect, apply_patch, set_relief (off/pom/spom on configured relief surfaces), step (paused only), run_test, play, pause, reset, load_game, unload_game or get_stats. Returns received; fetch the applied receipt with gripforge_runtime_receipt. Preview changes do not persist the project. Unknown kits/components and invalid fields are refused by the Rust core.',
-    { project_id: projectId, command: schema.record(schema.string(), schema.unknown()) }, { readOnly: false },
+    'Queue a versioned GripForge runtime command for the exact browser session. Use inspect, apply_patch, set_relief (off/pom/spom on configured relief surfaces), step (paused only), run_test, play, pause, reset, load_game, unload_game or get_stats. Returns received; fetch the applied receipt with gripforge_runtime_receipt. Preview changes do not persist the project. Unknown kits/components and invalid fields are refused by the Rust core. 0 credits.',
+    { project_id: projectId, command: schema.record(schema.string(), schema.unknown()).describe('The versioned runtime command: { protocol_version: 1, request_id, session_id (from gripforge_runtime_sessions), expected_revision, operation (inspect, apply_patch, set_relief, step, run_test, play, pause, reset, load_game, unload_game, get_stats), payload }.') }, { readOnly: false },
     async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/runtime`, { ...args, action: 'command' }, 'POST', extra?.signal));
   tool('gripforge_runtime_receipt', 'Read Rust command receipt',
-    'Read received/applied/rejected status for a Rust preview request, including simulation boundary and revisions.',
-    { project_id: projectId, session_id: schema.string().max(96), request_id: schema.string().max(96) }, { readOnly: true },
+    'Read received/applied/rejected status for a Rust preview request, including simulation boundary and revisions. 0 credits.',
+    { project_id: projectId, session_id: sessionId, request_id: schema.string().max(96).describe('The request_id of the command sent with gripforge_runtime_command.') }, { readOnly: true },
     async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/runtime`, args, 'GET', extra?.signal, { session_id: String(args.session_id), request_id: String(args.request_id) }));
 
   // The same authenticated mailbox and preview-session capability as gameplay.
   // Do not overload gripforge_apply_realism: that tool edits saved scene data.
   for (const operation of ['get_render_capabilities', 'configure_render_preview', 'render_preview', 'cancel_render_preview'] as const) {
     tool(`gripforge_${operation}`, `Bevy neural preview: ${operation}`,
-      'Local optional Bevy neural snapshot, not a saved scene edit. Requires an open authorized browser runtime session. Configure off/preview; realtime_experimental is refused. Trained weights and a local rights manifest must be selected in the browser; none are downloaded. render_preview starts an asynchronous request: read the command receipt, then query get_render_capabilities for actual completion, model, effective resolution, provenance, timings and limitations. Cancellation prevents stale publication. No images are uploaded.',
-      { project_id: projectId, session_id: schema.string().max(96), request_id: schema.string().regex(/^[-\w.]{1,96}$/), expected_revision: schema.number().int().nonnegative(),
-        ...(operation === 'configure_render_preview' ? { mode: schema.enum(['off', 'preview']) } : {}) },
+      'Local optional Bevy neural snapshot, not a saved scene edit. Requires an open authorized browser runtime session. Configure off/preview; realtime_experimental is refused. Trained weights and a local rights manifest must be selected in the browser; none are downloaded. render_preview starts an asynchronous request: read the command receipt, then query get_render_capabilities for actual completion, model, effective resolution, provenance, timings and limitations. Cancellation prevents stale publication. No images are uploaded. 0 credits.',
+      { project_id: projectId, session_id: sessionId,
+        request_id: schema.string().regex(/^[-\w.]{1,96}$/).describe('A new id of your choosing for this request (letters, digits, - _ .): its receipt is read with gripforge_runtime_receipt.'),
+        expected_revision: schema.number().int().nonnegative().describe('The revision of the session as gripforge_runtime_sessions reports it: a request on another revision is refused.'),
+        ...(operation === 'configure_render_preview' ? { mode: schema.enum(['off', 'preview']).describe('off: no neural preview; preview: snapshots on request (realtime_experimental is refused).') } : {}) },
       { readOnly: operation === 'get_render_capabilities' },
       async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/runtime`, {
         ...args, action: 'command', command: { protocol_version: 1, request_id: args.request_id, session_id: args.session_id,

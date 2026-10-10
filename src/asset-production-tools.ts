@@ -94,3 +94,22 @@ export function assetGenerationOutput(schema: typeof z = z) {
     item: schema.record(schema.string(), schema.unknown()).optional(), provider: schema.string().optional(), notes: schema.array(schema.string()).optional(),
   }).passthrough();
 }
+
+/**
+ * Le verdict « game-ready » d'un item (`meta.gameReady`) et son collider (`meta.collider`) en lignes lisibles,
+ * placées avant le JSON par `gripforge_library_get` (client npm et MCP hébergé). Chaîne vide sans verdict.
+ */
+export function gameReadyLines(meta: Record<string, unknown> | null | undefined): string {
+  if (!meta || typeof meta !== 'object') return '';
+  const gr = meta.gameReady as { ready?: boolean; missing?: unknown[]; checks?: Record<string, unknown> } | undefined;
+  const collider = meta.collider as { kind?: string; triangles?: number } | undefined;
+  const lines: string[] = [];
+  if (gr && typeof gr === 'object') {
+    lines.push(`game-ready: ${gr.ready ? 'YES' : 'NO'}${Array.isArray(gr.missing) && gr.missing.length ? ` — missing: ${gr.missing.join(', ')}` : ''}`);
+    if (gr.checks && typeof gr.checks === 'object') {
+      lines.push(`checks: ${Object.entries(gr.checks).map(([k, v]) => `${k}=${v && typeof v === 'object' && 'ok' in v ? String((v as { ok: unknown }).ok) : JSON.stringify(v)}`).join(' · ')}`);
+    }
+  }
+  if (collider && typeof collider === 'object') lines.push(`collider: ${collider.kind ?? '?'}, ${collider.triangles ?? '?'} triangles (sidecar collider)`);
+  return lines.length ? lines.join('\n') + '\n\n' : '';
+}

@@ -20,7 +20,7 @@ import { registerGameKitTools } from './gamekit-tools.js';
 import { registerJoystickTools } from './joystick-tools.js';
 import { registerAbilityTools } from './ability-tools.js';
 import { registerUiScreenTools } from './ui-screen-tools.js';
-import { registerAssetProductionTools } from './asset-production-tools.js';
+import { gameReadyLines, registerAssetProductionTools } from './asset-production-tools.js';
 import { registerCreatureRigTools } from './creature-rig-tools.js';
 import { registerWeaponMotionTools } from './weapon-motion-tools.js';
 import { registerShieldVfxTools } from './shield-vfx-tools.js';
@@ -565,7 +565,9 @@ server.tool(
   {
     idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
     prompt: z.string().min(3).max(600).describe('Description. "Devil May Cry like enemy" → tagged devil-may-cry, kind=enemy.'),
-    provider: z.enum(['tripo', 'meshy']).optional().describe('Default tripo. Forced meshy when concept_item / path / file_url is set.'),
+    provider: z.enum(['tripo', 'meshy', 'gpu']).optional().describe('Default tripo (text) / meshy (image), or the server default. tripo is forced to meshy when concept_item / path / file_url is set. ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
+    engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
+    rig: z.boolean().optional().describe('provider gpu only: true = rig with Tripo (only when Tripo is configured on the server); default false = unrigged, meta.rig = none.'),
     name: z.string().max(160).optional().describe('Library item name (default: the prompt)'),
     kind: z.enum(['character', 'enemy', 'boss']).optional().describe('character | enemy | boss (boss → enemy + meta.boss)'),
     polycount: z.number().optional().describe('Target triangles. Meshy characters default 8000.'),
@@ -575,7 +577,7 @@ server.tool(
     file_url: z.string().optional().describe('https URL of a concept or T-pose image. Image-to-3D.'),
     out_dir: z.string().optional().describe('After the job completes, gripforge_library_pull into this folder.'),
   },
-  async ({ idempotency_key, prompt, provider, name, kind, polycount, underwear, concept_item, path, file_url, out_dir }) => {
+  async ({ idempotency_key, prompt, provider, engine, rig, name, kind, polycount, underwear, concept_item, path, file_url, out_dir }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     let image_base64: string | undefined;
     if (path) {
@@ -600,7 +602,9 @@ server.tool(
       body: JSON.stringify({
         idempotency_key,
         prompt,
-        provider: image_base64 || concept_item ? 'meshy' : provider,
+        // gpu reste gpu ; une image force meshy à la place de tripo ; sans fournisseur, le défaut du serveur.
+        provider: provider === 'gpu' ? 'gpu' : (image_base64 || concept_item) && provider ? 'meshy' : provider,
+        ...(provider === 'gpu' ? { engine, rig } : {}),
         name,
         kind,
         polycount,
@@ -642,10 +646,11 @@ server.tool(
     name: z.string().max(160).optional(),
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
     style: z.enum(['melee', 'gun', 'shield', 'staff']).optional().describe('Grip style for attach (inferred if omitted)'),
-    provider: z.enum(['meshy', 'tripo']).optional().describe('Default meshy'),
+    provider: z.enum(['meshy', 'tripo', 'gpu']).optional().describe('Default meshy (or the server default). ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
+    engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
     out_dir: z.string().optional().describe('After the durable job completes, use gripforge_library_pull with this out_dir.'),
   },
-  async ({ idempotency_key, prompt, name, polycount, style, provider, out_dir }) => {
+  async ({ idempotency_key, prompt, name, polycount, style, provider, engine, out_dir }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/generate-character`, {
       method: 'POST',
@@ -657,7 +662,9 @@ server.tool(
         kind: 'weapon',
         polycount: polycount ?? 4000,
         style,
-        provider: provider ?? 'meshy',
+        // Sans fournisseur : le défaut du serveur (GRIPFORGE_FORGE_DEFAULT, sinon meshy).
+        provider,
+        ...(provider === 'gpu' && engine ? { engine } : {}),
       }),
     });
     const data = (await res.json().catch(() => ({}))) as {
@@ -690,7 +697,8 @@ server.tool(
     prompt: z.string().min(3).max(600).describe('e.g. compact orange open-cockpit racing kart, isolated'),
     name: z.string().max(160).optional(),
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
-    provider: z.enum(['meshy', 'tripo']).optional().describe('Default meshy'),
+    provider: z.enum(['meshy', 'tripo', 'gpu']).optional().describe('Default meshy (or the server default). ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
+    engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
     concept_item: z.string().min(1).max(160).optional().describe('Owned concept image in this workspace; forces Meshy image-to-3D.'),
     concept_items: z.array(z.string().min(1).max(160)).min(2).max(4).optional().describe('2–4 distinct owned views of the SAME prop for Meshy multi-image-to-3D. Do not combine with concept_item. Geometry standard/2k only.'),
     meshQuality: z.object({ geometry: z.enum(['standard', '2k', '4k']), texture: z.enum(['2k', '4k', '8k']) }).optional().describe('Meshy geometry and PBR texture quality. Requested texture resolution is retained through optimization.'),
@@ -698,7 +706,7 @@ server.tool(
     out_dir: z.string().optional().describe('After the durable job completes, use gripforge_library_pull with this out_dir.'),
     subtype: z.enum(['vehicle', 'none']).optional().describe('vehicle: made as the Vehicles prop sub-kind — no grip style, nose on +Z, the four wheels split with hub pivots so it drives. Then finished like a game car: paint, glass, chrome, grille and lamp materials, smoothed body, modelled wheels. Detected from the prompt (car, truck, van, kart…) when omitted; none opts out.'),
   },
-  async ({ idempotency_key, prompt, name, polycount, provider, concept_item, concept_items, meshQuality, optimize, out_dir, subtype }) => {
+  async ({ idempotency_key, prompt, name, polycount, provider, engine, concept_item, concept_items, meshQuality, optimize, out_dir, subtype }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/generate-character`, {
       method: 'POST',
@@ -710,7 +718,7 @@ server.tool(
         kind: 'prop',
         subtype,
         polycount: polycount ?? 4000,
-        provider: provider ?? 'meshy', concept_item, concept_items, meshQuality, optimize,
+        provider, ...(provider === 'gpu' && engine ? { engine } : {}), concept_item, concept_items, meshQuality, optimize,
       }),
     });
     const data = (await res.json().catch(() => ({}))) as {
@@ -1040,14 +1048,15 @@ server.tool(
 
 server.tool(
   'gripforge_library_get',
-  'Get one Library item (metadata + signed file URL).',
+  'Get one Library item (metadata + signed file URL). A forged mesh shows its game-ready verdict first (meta.gameReady: ready, missing checks; meta.collider).',
   { id: z.string().describe('Library id (lib_…)') },
   async ({ id }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/library/${encodeURIComponent(id)}`, { headers: apiHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
-    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    // Le verdict « game-ready » (meta.gameReady) et le collider en tête, lisibles sans fouiller meta.
+    return { content: [{ type: 'text' as const, text: gameReadyLines((data as { item?: { meta?: Record<string, unknown> } }).item?.meta) + JSON.stringify(data, null, 2) }] };
   },
 );
 
