@@ -821,7 +821,7 @@ server.tool(
           project: z.string().optional().describe('Game Kit project id.'),
           expected_revision: z.number().int().positive().optional().describe('Required for apply and concept. Use the current revision from get or expected_revision from quote.'),
           title: z.string().max(120).optional(),
-          brief: z.string().max(3000).optional(),
+          brief: z.string().max(3000).optional().describe('Preserve user visual references verbatim, then describe typography, shapes, density and hierarchy independently of the world setting. quote returns the exact concept_prompt for inspection.'),
           template: z.string().max(40).optional().describe('tactical, rpg, survivor, kart, royale, moba; see templates.'),
           theme: z.enum(['harbor', 'gothic', 'neon', 'minimal']).optional(),
           document: z.record(z.string(), z.unknown()).optional().describe('Editable HUD Studio v2 document.'),
