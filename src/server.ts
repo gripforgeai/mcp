@@ -814,18 +814,23 @@ server.tool(
 
 server.tool(
   'gripforge_hud',
-  'Reusable HUD design: action templates/plan/get/apply/quote/concept uses HUD Studio v2 + hud.tactical + ui.theme; concept is a durable per-game AI reference. FPS live adapter on Bevy web; other genres can export templates. Omit action for legacy. Survivor HUD kit: hud.json + cartoon PNGs + Godot .tscn + Three / Unity / Unreal snippets. ' +
+  'Artistic QA: get returns renderer_version and latest review. Upload a fresh HUD viewport screenshot to the private Library, call review_quote with capture_item/capture, forward exact next to review and poll its job. Re-read get: only current approved review validates that capture/state; preview cannot validate game contrast. Reusable HUD design: action templates/plan/get/apply/quote/concept uses HUD Studio v2 + hud.tactical + ui.theme; concept is a durable per-game AI reference. FPS live adapter on Bevy web; other genres can export templates. Omit action for legacy. Survivor HUD kit: hud.json + cartoon PNGs + Godot .tscn + Three / Unity / Unreal snippets. ' +
     'Writes the folder (npm). 1 credit. Do not redraw the hearts.',
   {
-    action: z.enum(['templates', 'plan', 'get', 'apply', 'quote', 'concept']).optional().describe('v2 reusable design workflow; omit to keep the survivor v1 export.'),
+    action: z.enum(['templates', 'plan', 'get', 'apply', 'quote', 'concept', 'review_quote', 'review']).optional().describe('v2 reusable design workflow; omit to keep the survivor v1 export.'),
           project: z.string().optional().describe('Game Kit project id.'),
-          expected_revision: z.number().int().positive().optional().describe('Required for apply and concept. Use the current revision from get or expected_revision from quote.'),
+          expected_revision: z.number().int().positive().optional().describe('Required for apply, concept and review. Use the current revision from get or expected_revision from quote.'),
           title: z.string().max(120).optional(),
           brief: z.string().max(3000).optional().describe('Preserve user visual references verbatim, then describe typography, shapes, density and hierarchy independently of the world setting. quote returns the exact concept_prompt for inspection.'),
           template: z.string().max(40).optional().describe('tactical, rpg, survivor, kart, royale, moba; see templates.'),
           theme: z.enum(['harbor', 'gothic', 'neon', 'minimal']).optional(),
           document: z.record(z.string(), z.unknown()).optional().describe('Editable HUD Studio v2 document.'),
           design: z.record(z.string(), z.unknown()).optional().describe('The design returned by plan: document + theme + brief. Apply requires the full document; edit the existing document from get to preserve layout.'),
+          capture_item: z.string().optional().describe('Owned private Library image containing only the actual HUD viewport, not the concept. Required for review_quote/review.'),
+          capture: z.object({ design_hash: z.string(), renderer_version: z.string(), viewport: z.object({ width: z.number(), height: z.number(), dpr: z.number() }), hud_scale: z.number(), source: z.enum(['preview', 'runtime']), state: z.string().max(500) }).optional().describe('Use hashes from get, dimensions in CSS pixels, actual dpr/scale and captured game state. Caller-submitted evidence, not server attestation.'),
+          reference_region: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).optional().describe('Normalized 0..1 crop of the concept gameplay panel; exclude menu studies. Defaults to full image.'),
+          review_provider: z.enum(['anthropic', 'xai']).optional(),
+          quote_hash: z.string().optional().describe('Required for review; forward the exact next payload from review_quote.'),
           hud_id: z.string().optional(),
           provider: z.enum(['openai', 'xai']).optional(),
           idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional(),
