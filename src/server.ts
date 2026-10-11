@@ -814,10 +814,22 @@ server.tool(
 
 server.tool(
   'gripforge_hud',
-  'Survivor HUD kit: hud.json + cartoon PNGs + Godot .tscn + Three / Unity / Unreal snippets. ' +
+  'Reusable HUD design: action templates/plan/get/apply/quote/concept uses HUD Studio v2 + hud.tactical + ui.theme; concept is a durable per-game AI reference. FPS live adapter on Bevy web; other genres can export templates. Omit action for legacy. Survivor HUD kit: hud.json + cartoon PNGs + Godot .tscn + Three / Unity / Unreal snippets. ' +
     'Writes the folder (npm). 1 credit. Do not redraw the hearts.',
   {
-    preset: z.literal('survivor').optional().describe('v1: survivor only (default)'),
+    action: z.enum(['templates', 'plan', 'get', 'apply', 'quote', 'concept']).optional().describe('v2 reusable design workflow; omit to keep the survivor v1 export.'),
+          project: z.string().optional().describe('Game Kit project id.'),
+          expected_revision: z.number().int().positive().optional(),
+          title: z.string().max(120).optional(),
+          brief: z.string().max(3000).optional(),
+          template: z.string().max(40).optional().describe('tactical, rpg, survivor, kart, royale, moba; see templates.'),
+          theme: z.enum(['harbor', 'gothic', 'neon', 'minimal']).optional(),
+          document: z.record(z.string(), z.unknown()).optional().describe('Editable HUD Studio v2 document.'),
+          design: z.record(z.string(), z.unknown()).optional().describe('The design returned by plan: document + theme + brief.'),
+          hud_id: z.string().optional(),
+          provider: z.enum(['openai', 'xai']).optional(),
+          idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional(),
+          preset: z.literal('survivor').optional().describe('v1: survivor only (default)'),
     health_type: z.enum(['hearts', 'bar']).optional().describe('default hearts'),
     health_max: z.number().int().min(1).max(1000000).optional().describe('default 5'),
     health_style: z.string().optional().describe('hearts skin or bar skin, or custom:<slug> from gripforge_hud_bar'),
@@ -826,8 +838,14 @@ server.tool(
     portrait: z.boolean().optional().describe('default true'),
     out_dir: z.string().optional().describe('Write hud.json, PNGs, tscn, snippets (default ./gripforge-hud)'),
   },
-  async ({ preset, health_type, health_max, health_style, currencies, minimap, portrait, out_dir }) => {
+  async (args) => {
+    const { preset, health_type, health_max, health_style, currencies, minimap, portrait, out_dir } = args;
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
+    if (args.action) {
+      const response = await fetch(`${API_URL}/api/v1/hud/design`, { method: 'POST', headers: { ...apiHeaders(), 'content-type': 'application/json' }, body: JSON.stringify(args), signal: AbortSignal.timeout(30_000) });
+      const data = await response.json();
+      return response.ok ? { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] } : err(String(data.error ?? 'HUD design failed'));
+    }
     const res = await fetch(`${API_URL}/api/v1/hud`, {
       method: 'POST',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },

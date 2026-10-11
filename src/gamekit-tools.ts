@@ -173,19 +173,19 @@ export function registerGameKitTools(
   }
 
   const completionTools = [
-    ['define_game', 'define', 'Persist a versioned Game Completion Contract with revision checking. Read get_completion_report for its schema and a proposed contract. Required, optional and excluded capabilities describe the actual intended experience.'],
-    ['resolve_requirements', 'resolve', 'Resolve the saved contract, transitive capabilities and rules into an inspectable requirement graph. Does not run tests.'],
-    ['audit_game', 'audit', 'Inspect project structure and flow, preserve fresh build evidence and report unsupported tests explicitly.'],
-    ['get_completion_report', 'get', 'Read the contract, requirements, implementation status, build-specific evidence, blockers and remediation. Without a contract returns the schema and a proposal.'],
-    ['test_game', 'test', 'Queue validation on the existing durable job worker. Returns job and status_url; poll that URL with the existing job tools. Simulation is not end-to-end gameplay proof.'],
-    ['complete_game', 'complete', 'Queue bounded completion using existing kit installers and regression tests. Preserves exclusions and project revision safety. No paid generation or destructive replacement. Poll status_url; succeeded means the job finished, inspect report.ready.'],
-    ['validate_release', 'release', 'Evaluate explicit release blockers for the current build. Only report.ready=true proves all mandatory acceptance checks passed; coverage ratios never override blockers.'],
+    ['define_game', 'define', 'Persist a versioned Game Completion Contract with revision checking. Read get_completion_report for its schema and a proposed contract. Required, optional and excluded capabilities describe the actual intended experience. 0 credits.'],
+    ['resolve_requirements', 'resolve', 'Resolve the saved contract, transitive capabilities and rules into an inspectable requirement graph. Does not run tests. 0 credits.'],
+    ['audit_game', 'audit', 'Inspect project structure and flow, preserve fresh build evidence and report unsupported tests explicitly. 0 credits.'],
+    ['get_completion_report', 'get', 'Read the contract, requirements, implementation status, build-specific evidence, blockers and remediation. Without a contract returns the schema and a proposal. 0 credits.'],
+    ['test_game', 'test', 'Queue validation on the existing durable job worker. Returns job and status_url; poll that URL with the existing job tools. Simulation is not end-to-end gameplay proof. 0 credits.'],
+    ['complete_game', 'complete', 'Queue bounded completion using existing kit installers and regression tests. Preserves exclusions and project revision safety. No paid generation or destructive replacement. Poll status_url; succeeded means the job finished, inspect report.ready. 0 credits.'],
+    ['validate_release', 'release', 'Evaluate explicit release blockers for the current build. Only report.ready=true proves all mandatory acceptance checks passed; coverage ratios never override blockers. 0 credits.'],
   ] as const;
   for (const [name, action, description] of completionTools) register(`gripforge_${name}`, {
     title: `Game completeness: ${name.replaceAll('_', ' ')}`, description,
     inputSchema: { project_id: projectId, ...workspace,
-      ...(action === 'define' ? { contract: schema.record(schema.string(),schema.unknown()).describe('GameCompletionContract matching the versioned schema returned by get_completion_report.'), expected_revision: schema.number().int().min(0) } : {}),
-      ...(action === 'complete' || action === 'test' ? { max_attempts: schema.number().int().min(1).max(12).optional(), idempotency_key: schema.string().min(8).max(160).optional() } : {}),
+      ...(action === 'define' ? { contract: schema.record(schema.string(),schema.unknown()).describe('GameCompletionContract matching the versioned schema returned by get_completion_report.'), expected_revision: schema.number().int().min(0).describe('Revision of the saved contract as get_completion_report returns it (0 for the first definition): a stale revision is refused.') } : {}),
+      ...(action === 'complete' || action === 'test' ? { max_attempts: schema.number().int().min(1).max(12).optional().describe('Upper bound of attempts of the queued job (1-12).'), idempotency_key: schema.string().min(8).max(160).optional().describe('Repeat the same key to get the job already queued instead of a new one.') } : {}),
     },
     outputSchema: {
       defined: schema.boolean().optional(), revision: schema.number().int().optional(),
