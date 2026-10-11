@@ -53,7 +53,7 @@ export const GAMEKIT_TOOL_NAMES = [
  * leads to. One table, so the journey reads the same from every tool — and one place to change it.
  */
 export const TOOL_JOURNEY: Record<string, string> = {
-  gripforge_gamekit_search: 'Journey — first: find the preset of the genre. Its `done` says what a finished game of that genre has beyond the request, and gripforge_game_audit checks it at the end.',
+  gripforge_gamekit_search: 'Journey — first: find the preset of the genre. Its `done` says what a finished game of that genre has beyond the request: write it into the contract (gripforge_define_game) as required, and gripforge_game_audit checks it at the end.',
   gripforge_gamekit_installed: 'Journey — first on an existing project; gripforge_game_audit then says what stands between it and a finished game.',
   gripforge_gamekit_install: 'Journey — while composing. A kit installed and left empty is not done (audio.core without a sound, ui.endscreen without an end condition): gripforge_game_audit names them.',
   gripforge_gamekit_configure: 'Journey — while composing, and to fix what gripforge_game_audit reports (its defects carry the exact config to write).',
@@ -64,11 +64,15 @@ export const TOOL_JOURNEY: Record<string, string> = {
   gripforge_game_mods: 'Journey — while building or after: a packaged way to apply the same extension mechanisms (config, documents, hooks, reactions) as one separable unit — a variant to switch on, content added over the game, a game opened to its players\' mods (an option of the developer). gripforge_game_audit then plays the modded game.',
   gripforge_game_content: 'Journey — the content of the game. Once written, gripforge_game_audit says what a finished game of the genre still lacks (a quest, a way to win and to lose, dialogues…).',
   gripforge_game_test: 'Journey — after each change. A playtest that passes is not a finished game: gripforge_game_audit (playtest="run" runs this test) gives the verdict and everything the tester cannot see.',
-  gripforge_game_play_url: 'Journey — to look at the running game. Share it as finished only when gripforge_game_audit says complete; otherwise say what is left.',
-  gripforge_game_web_export: 'Journey — last. Run gripforge_game_audit first: export a game whose verdict is complete, or tell the user what is left.',
-  gripforge_gamekit_deliver: 'Journey — last. Run gripforge_game_audit first: deliver a game whose verdict is complete, or tell the user what is left.',
+  gripforge_game_play_url: 'Journey — to look at the running game. Share it as finished only when gripforge_game_audit says complete and gripforge_validate_release says ready; otherwise say what is left.',
+  gripforge_game_web_export: 'Journey — last. Run gripforge_game_audit then gripforge_validate_release first: export a game whose verdict is complete and whose release is ready, or tell the user what is left.',
+  gripforge_gamekit_deliver: 'Journey — last. Run gripforge_game_audit then gripforge_validate_release first: deliver a game whose verdict is complete and whose release is ready, or tell the user what is left.',
   gripforge_moba_roster: 'Journey — a MOBA needs distinct heroes; then gripforge_game_audit for the minions, towers, jungle monsters and the rest of a finished MOBA.',
   gripforge_ability_vfx: 'Journey — after the roster; gripforge_game_audit lists it among what a finished MOBA has.',
+  gripforge_define_game: 'Journey — right after choosing the genre. The finished game of its genre is the default scope: its definition of done and what every game has (a way to win AND to lose, title / pause / end screens, sound, the genre HUD, touch controls, a loop playable from start to end) are required capabilities; exclude one only when the user explicitly asks (an endless game), and say so.',
+  gripforge_get_completion_report: 'Journey — while building: what the contract still misses, leaves unverified, fails or blocks. The genre defects come from gripforge_game_audit.',
+  gripforge_test_game: 'Journey — after each change, with gripforge_game_test (the headless playtest). Passing tests are not a finished game: gripforge_game_audit, then gripforge_validate_release.',
+  gripforge_validate_release: 'Journey — last, after gripforge_game_audit says complete. The game is finished only when report.ready=true on a contract that holds the genre requirements; otherwise tell the user what is left and why.',
 };
 
 /** The tool's place in the journey, then its description (whose closing credit rule stays last). */
@@ -182,7 +186,7 @@ export function registerGameKitTools(
     ['validate_release', 'release', 'Evaluate explicit release blockers for the current build. Only report.ready=true proves all mandatory acceptance checks passed; coverage ratios never override blockers. 0 credits.'],
   ] as const;
   for (const [name, action, description] of completionTools) register(`gripforge_${name}`, {
-    title: `Game completeness: ${name.replaceAll('_', ' ')}`, description,
+    title: `Game completeness: ${name.replaceAll('_', ' ')}`, description: withJourney(`gripforge_${name}`, description),
     inputSchema: { project_id: projectId, ...workspace,
       ...(action === 'define' ? { contract: schema.record(schema.string(),schema.unknown()).describe('GameCompletionContract matching the versioned schema returned by get_completion_report.'), expected_revision: schema.number().int().min(0).describe('Revision of the saved contract as get_completion_report returns it (0 for the first definition): a stale revision is refused.') } : {}),
       ...(action === 'complete' || action === 'test' ? { max_attempts: schema.number().int().min(1).max(12).optional().describe('Upper bound of attempts of the queued job (1-12).'), idempotency_key: schema.string().min(8).max(160).optional().describe('Repeat the same key to get the job already queued instead of a new one.') } : {}),
