@@ -1745,15 +1745,23 @@ server.tool(
 
 server.tool(
   'gripforge_map_plan',
-  'FPS/bomb map. Interprets overhead as 3D compound (hollow rooms, corniche, A plat+pit, arches, vaulted tunnels, sidewalks). Preview https://gripforge.ai/map-plan?prompt=dust2. Pair gripforge_map_props + gripforge_map_wires. 0 credits. Dungeons: gripforge_level.',
-  { prompt: z.string().min(2).max(240).describe('e.g. counter-strike dust2 bomb defusal'),
+  'For original competitive 5v5 maps use target=tactical: fixed modular greybox, controller/bot paths, sightline/timing reports and diagnostic links. Optional art_profile applies reusable PBR harbor facades without changing gameplay collision. Human playtests required. Legacy FPS/bomb map. Interprets overhead as 3D compound (hollow rooms, corniche, A plat+pit, arches, vaulted tunnels, sidewalks). Preview https://gripforge.ai/map-plan?prompt=dust2. Pair gripforge_map_props + gripforge_map_wires. 0 credits. Dungeons: gripforge_level.',
+  { prompt: z.string().min(2).max(600).describe('e.g. Original industrial harbor, 5v5, two objective sites and contested Mid'),
+    target: z.enum(['legacy', 'tactical']).optional().describe('tactical: original fixed 5v5 greybox + controller route, collision and sightline reports; not certified balance'),
+    seed: z.number().int().min(0).max(4294967295).optional(),
+    variant: z.enum(['quay','switchyard','arcade']).optional(),
+          art_profile: z.enum(['mediterranean-harbor','limestone-harbor']).optional().describe('Reusable environment dressing; omit to qualify the greybox first'),
     item: z.string().optional().describe('lib_… traced plan from gripforge_map_concept (overrides the preset)'),
     windows: z.enum(['shuttered', 'barred', 'none']).optional().describe('Boundary windows: volets (default), grilles, ou aucune'),
     window_density: z.number().min(0).max(1).optional().describe('Share of boundary segments that get a window (default 0.25)'),
   },
-  async ({ prompt, item, windows, window_density }) => {
+  async ({ prompt, item, windows, window_density, target, seed, variant, art_profile }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const qs = new URLSearchParams({ prompt });
+    if(target)qs.set('target',target);
+    if(seed!==undefined)qs.set('seed',String(seed));
+    if(variant)qs.set('variant',variant);
+    if(art_profile)qs.set('art_profile',art_profile);
     if (item) qs.set('item', item);
     if (windows) qs.set('windows', windows);
     if (window_density != null) qs.set('window_density', String(window_density));

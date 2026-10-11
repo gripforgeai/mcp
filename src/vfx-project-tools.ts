@@ -5,7 +5,7 @@ import { z } from 'zod/v4';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { LOOK_DESCRIPTION, LOOK_VALUES } from './look.js';
 
-export type VfxProjectRegister = (name: string, config: { title: string; description: string; inputSchema: z.ZodRawShape; annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } }, callback: (args: Record<string, unknown>, extra?: { signal?: AbortSignal }) => Promise<CallToolResult>) => void;
+export type VfxProjectRegister = (name: string, config: { title: string; description: string; inputSchema: z.ZodRawShape; outputSchema?: z.ZodRawShape; annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } }, callback: (args: Record<string, unknown>, extra?: { signal?: AbortSignal }) => Promise<CallToolResult>) => void;
 
 // The hosted SDK uses a newer Zod v4 serializer than the npm SDK. Inject its
 // matching factory so schemas remain compatible with each host's serializer.
