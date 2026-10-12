@@ -1469,24 +1469,21 @@ server.tool(
 
 server.tool(
   'gripforge_level',
-  'Plan a playable level from a prompt (0 credits): rooms placed in metres (entrance, combat rooms, junctions, key/lock, boss antechamber + boss room, treasure, secret room), connections, critical path, shortcuts, and gameplay spawns (player/packs/boss/rewards). Same seed → same level. target=bevy-coop exports a full 10–12 room modular/navigation plan for the existing Bevy kit. Prepare with tools/dungeon/prepare-expedition.mjs --plan level.json. Quality profiles specify budgets, not measured GPU guarantees. Pair with gripforge_scene_kit for dressing props and gripforge_style_kit for enemies.',
+  'Plan a playable level from a prompt (0 credits): rooms placed in metres (entrance, combat rooms, junctions, key/lock, boss antechamber + boss room, treasure, secret room), connections, critical path, shortcuts, and gameplay spawns (player/packs/boss/rewards). Same seed → same level. Pair with gripforge_scene_kit for dressing props and gripforge_style_kit for enemies.',
   {
     prompt: z.string().describe('e.g. "gothic castle dungeon, 3 combat rooms, one boss, exploration pacing"'),
     seed: z.number().optional(),
     combat_rooms: z.number().optional(),
     floors: z.number().optional(),
     optional_branches: z.number().optional(),
-    target: z.enum(['plan','bevy-coop']).optional(),
-    room_count: z.number().int().min(10).max(12).optional(),
-    quality: z.enum(['web','desktop','native']).optional(),
     out_dir: z.string().optional().describe('Write level.json here'),
   },
-  async ({ prompt, seed, combat_rooms, floors, optional_branches, target, room_count, quality, out_dir }) => {
+  async ({ prompt, seed, combat_rooms, floors, optional_branches, out_dir }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/level`, {
       method: 'POST',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, seed, combat_rooms, floors, optional_branches, target, room_count, quality }),
+      body: JSON.stringify({ prompt, seed, combat_rooms, floors, optional_branches }),
     });
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) return err(String(data.error ?? res.status));
