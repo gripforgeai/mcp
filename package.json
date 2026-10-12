@@ -1,6 +1,6 @@
 {
   "name": "@gripforgeai/mcp",
-  "version": "0.1.45",
+  "version": "0.1.48",
   "description": "The tools your AI needs to make your games. Turn prompts into production-ready game assets \u2014 animated characters with their weapons attached, seamless textures, terrain, VFX, HUDs \u2014 and playable game kits Unity, Godot, Unreal or Three.js can load.",
   "license": "MIT",
   "type": "module",
@@ -20,7 +20,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/server.js', 0o755)\"",
     "prepare": "tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/server.js', 0o755)\"",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "node --test test/*.test.mjs"
   },
   "keywords": [
     "mcp",

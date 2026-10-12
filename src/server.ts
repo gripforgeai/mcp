@@ -814,23 +814,27 @@ server.tool(
 
 server.tool(
   'gripforge_hud',
-  'Artistic QA: get returns renderer_version and latest review. Upload a fresh HUD viewport screenshot to the private Library, call review_quote with capture_item/capture, forward exact next to review and poll its job. Re-read get: only current approved review validates that capture/state; preview cannot validate game contrast. Reusable HUD design: action templates/plan/get/apply/quote/concept uses HUD Studio v2 + hud.tactical + ui.theme; concept is a durable per-game AI reference. FPS live adapter on Bevy web; other genres can export templates. Omit action for legacy. Survivor HUD kit: hud.json + cartoon PNGs + Godot .tscn + Three / Unity / Unreal snippets. ' +
+  'Required completion gate: action=workflow stays ready=false until a current runtime capture passes all artistic criteria. After screen_assets/assembly, submit screen_item (or design/project), renderer_version, capture_item, capture and the authorized review_budget; workflow schedules the reviewer automatically. Poll workflow; correct and recapture if changes_requested. No paid retry loop. Genre-independent workflow: pass design (from plan, edited) WITHOUT project to get/quote/concept/review_quote/review. get returns the normalized design hash; quote then concept returns reference_item. For review supply design, reference_item, renderer_version (fingerprint of actual presenter/build including styles/assets/dependencies), capture_item and capture. Forward exact quote.next and poll the generation job. This reviews an immutable snapshot; compare returned identity with current files before reusing the result. No installed kit or per-genre adapter is needed for concept/review. Project mode remains available: Artistic QA: get returns renderer_version and latest review. Upload a fresh HUD viewport screenshot to the private Library, call review_quote with capture_item/capture, forward exact next to review and poll its job. Re-read get: only current approved review validates that capture/state; preview cannot validate game contrast. Reusable HUD design: action templates/plan/get/apply/quote/concept uses HUD Studio v2 + hud.tactical + ui.theme; concept is a durable per-game AI reference. FPS live adapter on Bevy web; other genres can export templates. Omit action for legacy. Survivor HUD kit: hud.json + cartoon PNGs + Godot .tscn + Three / Unity / Unreal snippets. ' +
     'Writes the folder (npm). 1 credit. Do not redraw the hearts.',
   {
-    action: z.enum(['templates', 'plan', 'get', 'apply', 'quote', 'concept', 'review_quote', 'review']).optional().describe('v2 reusable design workflow; omit to keep the survivor v1 export.'),
+    action: z.enum(['templates', 'plan', 'get', 'apply', 'quote', 'concept', 'review_quote', 'review', 'workflow']).optional().describe('v2 reusable design workflow; omit to keep the survivor v1 export.'),
           project: z.string().optional().describe('Game Kit project id.'),
-          expected_revision: z.number().int().positive().optional().describe('Required for apply, concept and review. Use the current revision from get or expected_revision from quote.'),
+          expected_revision: z.number().int().positive().optional().describe('Required for project apply/concept/review; omitted in document mode. Forward quote.next.'),
           title: z.string().max(120).optional(),
           brief: z.string().max(3000).optional().describe('Preserve user visual references verbatim, then describe typography, shapes, density and hierarchy independently of the world setting. quote returns the exact concept_prompt for inspection.'),
           template: z.string().max(40).optional().describe('tactical, rpg, survivor, kart, royale, moba; see templates.'),
           theme: z.enum(['harbor', 'gothic', 'neon', 'minimal']).optional(),
           document: z.record(z.string(), z.unknown()).optional().describe('Editable HUD Studio v2 document.'),
-          design: z.record(z.string(), z.unknown()).optional().describe('The design returned by plan: document + theme + brief. Apply requires the full document; edit the existing document from get to preserve layout.'),
+          design: z.record(z.string(), z.unknown()).optional().describe('Full design returned by plan, with edited document/theme/brief. Without project: standalone get, concept and artistic review for any genre. With project: apply only.'),
+          screen_item: z.string().optional().describe('Analysed/cut screen Library ID. Uses its original concept and stored layout; omit design, project and reference_item. get/workflow/review_quote/review.'),
+          review_budget: z.object({ max_usd: z.number().nonnegative().optional(), max_credits: z.number().int().nonnegative().optional() }).optional().describe('workflow: authorized cap for one review in the quoted currency. With a capture, schedules the existing reviewer automatically within this cap; repeated calls reuse the job.'),
+          reference_item: z.string().optional().describe('Document-mode review: chosen concept Library ID. No project link required; use concept result.reference_item or an existing reference.'),
+          renderer_version: z.string().min(10).max(160).optional().describe('Document mode: fingerprint of the actual HUD presenter/build including styles, fonts/assets and dependencies. Must match capture.renderer_version; declared by caller, not inferred from genre.'),
           capture_item: z.string().optional().describe('Owned private Library image containing only the actual HUD viewport, not the concept. Required for review_quote/review.'),
           capture: z.object({ design_hash: z.string(), renderer_version: z.string(), viewport: z.object({ width: z.number(), height: z.number(), dpr: z.number() }), hud_scale: z.number(), source: z.enum(['preview', 'runtime']), state: z.string().max(500) }).optional().describe('Use hashes from get, dimensions in CSS pixels, actual dpr/scale and captured game state. Caller-submitted evidence, not server attestation.'),
           reference_region: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).optional().describe('Normalized 0..1 crop of the concept gameplay panel; exclude menu studies. Defaults to full image.'),
           review_provider: z.enum(['anthropic', 'xai']).optional(),
-          quote_hash: z.string().optional().describe('Required for review; forward the exact next payload from review_quote.'),
+          quote_hash: z.string().optional().describe('Required for review and document-mode concept; forward the exact next payload from the quote.'),
           hud_id: z.string().optional(),
           provider: z.enum(['openai', 'xai']).optional(),
           idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional(),
@@ -2170,7 +2174,7 @@ server.tool(
 
 server.tool(
   'gripforge_screen_assets',
-  'Cut the sprites of an analysed screen out of its own concept image (buttons, panels, icons, background) with 9-slice margins, and write them next to the layout. Pixel-identical to the concept, 0 credits.',
+  'Cut the sprites of an analysed screen out of its own concept image (buttons, panels, icons, background) with 9-slice margins, and write them next to the layout. Cutting is not an artistic approval: returns a required workflow gate. Assemble, capture the actual renderer, then call gripforge_hud workflow to run the reviewer. 0 credits for cutting.',
   {
     item: z.string().describe('Library id of a screen analysed by gripforge_screen_concept'),
     out_dir: z.string().describe('project root: files land under gripforge/screens/<id>/'),
@@ -2217,7 +2221,7 @@ server.tool(
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
       body: JSON.stringify({ item, ids, style }),
     });
-    const data = (await res.json().catch(() => ({}))) as { error?: string; files?: Record<string, string>; layout?: { id?: string }; icons?: string[] };
+    const data = (await res.json().catch(() => ({}))) as { error?: string; files?: Record<string, string>; layout?: { id?: string }; icons?: string[]; workflow?: unknown };
     if (!res.ok) return err(String(data.error ?? res.status));
     const wrote: string[] = [];
     for (const [rel, b64] of Object.entries(data.files ?? {})) {
@@ -2231,7 +2235,7 @@ server.tool(
       await writeFile(lp, JSON.stringify(data.layout, null, 2));
       wrote.push(lp);
     }
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ icons: data.icons, wrote: wrote.length }, null, 2) }] };
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ icons: data.icons, workflow: data.workflow, wrote: wrote.length }, null, 2) }] };
   },
 );
 

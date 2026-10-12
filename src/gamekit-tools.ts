@@ -3,11 +3,29 @@ import { z } from 'zod/v4';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { VfxProjectRegister } from './vfx-project-tools.js';
 import { LOOK_VALUES, LOOK_DESCRIPTION } from './look.js';
+import { DOC_TOPICS, docSections, findDoc, readDoc } from './docs.generated.js';
 import { CONTROL_SCHEME_IDS, GAMEPLAY_CHOICES_BLOCK } from './gameplay-choices.generated.js';
+
+/** Where the logic of the kits runs: wasm = the Rust kit host compiled to wasm (Bevy player only, falls back to ts), ts = the TypeScript KitHost (on request only). Default wasm. */
+export const PROJECT_LOGIC = ['wasm', 'ts'] as const;
+export type ProjectLogic = (typeof PROJECT_LOGIC)[number];
+/** The logic choice of a project answer: `logic` absent means the default, wasm; `default` = the project runs the default (wasm). */
+/** `runs`: where it really runs — ts when a kit has no Rust module (`fallback` names them; the game still plays, on the TypeScript KitHost). */
+export function projectLogic(project: unknown): { project: unknown; revision: unknown; logic: ProjectLogic; default: boolean; runs: ProjectLogic; fallback: string[]; note?: string } {
+  const p = (project && typeof project === 'object' ? project : {}) as Record<string, unknown>;
+  const set = p.logic === 'wasm' || p.logic === 'ts' ? p.logic : undefined;
+  const logic = set ?? 'wasm';
+  const fallback = Array.isArray(p.logicFallback) ? p.logicFallback.filter((k): k is string => typeof k === 'string') : [];
+  const runs: ProjectLogic = p.logicRuns === 'ts' || p.logicRuns === 'wasm' ? p.logicRuns : logic;
+  return { project: p.id, revision: p.revision, logic, default: logic === 'wasm', runs, fallback,
+    ...(logic === 'wasm' && runs === 'ts' ? { note: `No Rust module for ${fallback.join(', ')}: this game runs on the TypeScript KitHost until they are ported.` } : {}) };
+}
 
 export const GAMEKIT_TOOL_NAMES = [
   'gripforge_gamekit_search',
   'gripforge_gamekit_get',
+  'gripforge_gamekit_api',
+  'gripforge_docs',
   'gripforge_gamekit_installed',
   'gripforge_gamekit_install',
   'gripforge_gamekit_remove',
@@ -283,13 +301,64 @@ export function registerGameKitTools(
       id: kitId,
       version: schema.string().max(40).optional().describe('Exact version to read (e.g. 1.0.0). Default: latest.'),
       with_usage: schema.boolean().optional().describe('true to include usedBy: the workspace projects where this kit is installed.'),
+      section: schema.enum(['api']).optional().describe('api: also return `api`, the full API reference of the kit (config with units and limits, hooks, events, views, services, verbs, slots, collections, mod points, presentation module, target parity, changelog, examples of a config and of a mod). For a compact Markdown form use gripforge_gamekit_api.'),
     },
     { readOnly: true },
     (args, extra) =>
       api(`gamekits/${enc(args.id)}`, args, 'GET', extra?.signal, {
         version: typeof args.version === 'string' ? args.version : undefined,
         with: args.with_usage === true ? 'usage' : undefined,
+        section: args.section === 'api' ? 'api' : undefined,
       }),
+  );
+
+  tool(
+    'gripforge_gamekit_api',
+    'API reference of a Game Kit',
+    'The API reference of one Game Kit, as compact Markdown: what it does and when to use it, every config key (type, default, unit, limits; mod = a mod may set it, live = read again while the game runs, scene = a scene may override it), hooks (payload, mutable fields, cancellable), events emitted and listened to (when, payload), web views and HUD vars, services and their methods, script verbs, asset slots, data collections, input actions, mod points, its Bevy presentation module (needs, ABI families, web UI), target parity, changelog, and an example config and an example mod (gripforge.mod/1). Read it BEFORE gripforge_gamekit_configure, before writing a mod (gripforge_game_mods) or hooks / scripts for the kit, and before writing its presentation module. sections narrows the answer (e.g. ["config","hooks"]); full=true adds nested keys, examples of every hook and verb, and the README. 0 credits.',
+    {
+      id: kitId,
+      sections: schema.array(schema.enum(['summary', 'config', 'hooks', 'events', 'views', 'services', 'verbs', 'slots', 'collections', 'inputs', 'modding', 'module', 'parity', 'changelog', 'examples', 'readme'])).max(16).optional().describe('Only these sections (default: all).'),
+      full: schema.boolean().optional().describe('true: the full form (nested config keys, every example, README). Default: compact.'),
+    },
+    { readOnly: true },
+    async (args, extra) => {
+      const res = await api(`gamekits/${enc(args.id)}/api`, args, 'GET', extra?.signal, {
+        format: 'md',
+        compact: args.full === true ? undefined : 1,
+        sections: Array.isArray(args.sections) && args.sections.length ? args.sections.join(',') : undefined,
+      });
+      if (res.isError) return res;
+      const markdown = String((res.structuredContent as { markdown?: unknown } | undefined)?.markdown ?? '');
+      return { content: [{ type: 'text', text: markdown }] };
+    },
+  );
+
+  tool(
+    'gripforge_docs',
+    'GripForge docs (offline)',
+    `The GripForge docs, embedded in this MCP (readable offline, versioned with it), as Markdown. Without topic: the list of topics. With topic: its text, or one section (section = a heading, its number such as "4.2", or words of it); a long topic answers its table of contents first unless a section is given or full=true. Topics: ${DOC_TOPICS.map((t) => t.id).join(', ')}. Read "third-party" and "porting" + "abi" before writing a presentation module, "modding" before writing a mod, "glossary" for the words. A kit's own API reference is gripforge_gamekit_api. 0 credits.`,
+    {
+        topic: schema.string().max(40).optional().describe(`One of: ${DOC_TOPICS.map((t) => t.id).join(', ')}.`),
+        section: schema.string().max(120).optional().describe('A heading of the topic, its number ("3.1", "§4") or words of it.'),
+        full: schema.boolean().optional().describe('true: the whole topic even when long.'),
+    },
+    { readOnly: true },
+    async (args) => {
+      const text = (t: string): CallToolResult => ({ content: [{ type: 'text', text: t }] });
+      if (typeof args.topic !== 'string' || !args.topic) {
+        return text(['# GripForge docs', '', ...DOC_TOPICS.map((t) => `- **${t.id}** — ${t.title}: ${t.summary}`), '', 'Read one: gripforge_docs { topic, section? }. A kit: gripforge_gamekit_api { id }.'].join('\n'));
+      }
+      const topic = findDoc(args.topic);
+      if (!topic) return fail(`Unknown topic ${args.topic}. Topics: ${DOC_TOPICS.map((t) => t.id).join(', ')}`);
+      const section = typeof args.section === 'string' && args.section ? args.section : undefined;
+      const read = readDoc(topic, section);
+      if (!read) return fail(`No section "${section}" in ${topic.id}. Sections: ${docSections(topic).map((s) => s.title).join(' · ')}`);
+      if (!section && args.full !== true && read.text.length > 24_000) {
+        return text([`# ${topic.title}`, '', topic.summary, '', `${Math.round(read.text.length / 1024)} KB: read a section with gripforge_docs { topic: "${topic.id}", section }, or full=true.`, '', ...read.sections.map((s) => `${s.level === 3 ? '  ' : ''}- ${s.title}`)].join('\n'));
+      }
+      return text(read.text);
+    },
   );
 
   tool(
@@ -532,10 +601,10 @@ export function registerGameKitTools(
   tool(
     'gripforge_game_project',
     'List, create, read, bind, feed, set the controls of or delete Game Kit projects',
-    'Manage Game Kit projects (gkp_…): the container holding installed kits, their lockfile, asset bindings and data collections. action=list lists the workspace projects; create needs name and takes a preset (see gripforge_gamekit_search; adventure is the reference game of game.engine) or an explicit kits map — every new project gets game.engine first (the engine of the game: scenes, archetypes, scripts, life cycle; its answer carries the engine start pack { structure, scene, blocks, order, next, rules } and added, the kits installed for dependencies), then the default kits ui.menu (title / pause / options / load and save screen), input.remap (key remapping), settings.graphics (graphics options), ui.prompts (on-screen key prompts that follow remapping and the gamepad), ui.endscreen (end screen and credits), save.persistence (save slots, quick save, autosave), audio.core (game audio: mixer, music, effects, event → sound table), i18n.text (game texts in the player’s language: translation tables in the translations collection, ICU plurals) ui.theme (the design of every interface as kit config: colours, font, shapes, key glyphs; unset = built-in look) and input.virtualpad (the on-screen gamepad of touch screens, mode auto: shown on a touch screen without a gamepad, Touch controls tab) and display.fullscreen (the game in fullscreen: F11, the Options entry, start in fullscreen with atStart, the player’s choice saved), asset.preload (the files of the game loaded in phases — first playable frame, background, next scene ahead — each file once, checked; progress as state and events shown by ui.menu, ui.endscreen and hud.action) and asset.cache (the files kept on the device between visits: IndexedDB, then Cache Storage with a service worker, then the HTTP cache; quota and eviction) and, on web, ai.navigation (the paths of the game over its real collision geometry: route and steer for NPCs, enemies and click-to-move), addedBy default: keep and configure them (never recode a pathfinding: ask ai.navigation and adapt its config, the hook navigation.plan and the event navigation.blocked; never recode an asset loader, a download queue or a cache: adapt their rules, asset_preload documents, scenes ahead and cache quota instead), leave one out ({ "ui.menu": false }) or remove it only if the user asks. They hold for EVERY game, a compiled module with its own page or a custom page included: that page mounts the menu, Options › Controls and Video, fullscreen and the prompts from the bindings through the kits’ web views (gripforge-ui.mjs, GET /api/v1/hud) or their adapter, never its own copy; get returns the full ProjectDetail (installed kits, bindings, capabilities, missing, playUrl); bind maps asset slots to Library items (lib_…, null to clear); data reads a collection or upserts / removes documents validated against the kits’ schemas (replace=true swaps the whole collection); controls reads or sets the controls: without scheme it returns the control schemes of the catalogue (fps, third_person, moba_click, top_down, platformer, fighting, vehicle, rts, point_click: movement by keys or by click, what the mouse is for, expected actions and keys, touch layout), the project scheme, the one its kits suggest, every action with its effective key and the keys two actions share in one mode (warnings with a proposed reassignment, never a refusal — also in get → report.controls); with scheme and dry_run=true it returns the diff of keys the scheme would write; with scheme alone it applies it (input.actions overrides marked source: scheme, the touch layout of input.virtualpad, the help bar of ui.prompts). Choose the scheme from the kind of game, never from a kit default: \n' + GAMEPLAY_CHOICES_BLOCK + '\nA scheme is a starting proposal: a preset applies its own at creation (create takes controls to pick another one — pass the scheme of the kind of game the user asked for — or none), and any key stays changeable with gripforge_gamekit_configure input.actions { overrides: [{ action, keys, buttons?, disabled? }] } — the action of any kit; those entries always win over the scheme. delete needs confirm=true. Call this first to create or pick the project, then gripforge_gamekit_installed (existing project) or gripforge_gamekit_install. 0 credits.',
+    'Manage Game Kit projects (gkp_…): the container holding installed kits, their lockfile, asset bindings and data collections. action=list lists the workspace projects; create needs name and takes a preset (see gripforge_gamekit_search; adventure is the reference game of game.engine) or an explicit kits map — every new project gets game.engine first (the engine of the game: scenes, archetypes, scripts, life cycle; its answer carries the engine start pack { structure, scene, blocks, order, next, rules } and added, the kits installed for dependencies), then the default kits ui.menu (title / pause / options / load and save screen), input.remap (key remapping), settings.graphics (graphics options), ui.prompts (on-screen key prompts that follow remapping and the gamepad), ui.endscreen (end screen and credits), save.persistence (save slots, quick save, autosave), audio.core (game audio: mixer, music, effects, event → sound table), i18n.text (game texts in the player’s language: translation tables in the translations collection, ICU plurals) ui.theme (the design of every interface as kit config: colours, font, shapes, key glyphs; unset = built-in look) and input.virtualpad (the on-screen gamepad of touch screens, mode auto: shown on a touch screen without a gamepad, Touch controls tab) and display.fullscreen (the game in fullscreen: F11, the Options entry, start in fullscreen with atStart, the player’s choice saved), asset.preload (the files of the game loaded in phases — first playable frame, background, next scene ahead — each file once, checked; progress as state and events shown by ui.menu, ui.endscreen and hud.action) and asset.cache (the files kept on the device between visits: IndexedDB, then Cache Storage with a service worker, then the HTTP cache; quota and eviction) and, on web, ai.navigation (the paths of the game over its real collision geometry: route and steer for NPCs, enemies and click-to-move), addedBy default: keep and configure them (never recode a pathfinding: ask ai.navigation and adapt its config, the hook navigation.plan and the event navigation.blocked; never recode an asset loader, a download queue or a cache: adapt their rules, asset_preload documents, scenes ahead and cache quota instead), leave one out ({ "ui.menu": false }) or remove it only if the user asks. They hold for EVERY game, a compiled module with its own page or a custom page included: that page mounts the menu, Options › Controls and Video, fullscreen and the prompts from the bindings through the kits’ web views (gripforge-ui.mjs, GET /api/v1/hud) or their adapter, never its own copy; get returns the full ProjectDetail (installed kits, bindings, capabilities, missing, playUrl); bind maps asset slots to Library items (lib_…, null to clear); data reads a collection or upserts / removes documents validated against the kits’ schemas (replace=true swaps the whole collection); controls reads or sets the controls: without scheme it returns the control schemes of the catalogue (fps, third_person, moba_click, top_down, platformer, fighting, vehicle, rts, point_click: movement by keys or by click, what the mouse is for, expected actions and keys, touch layout), the project scheme, the one its kits suggest, every action with its effective key and the keys two actions share in one mode (warnings with a proposed reassignment, never a refusal — also in get → report.controls); with scheme and dry_run=true it returns the diff of keys the scheme would write; with scheme alone it applies it (input.actions overrides marked source: scheme, the touch layout of input.virtualpad, the help bar of ui.prompts). Choose the scheme from the kind of game, never from a kit default: \n' + GAMEPLAY_CHOICES_BLOCK + '\nA scheme is a starting proposal: a preset applies its own at creation (create takes controls to pick another one — pass the scheme of the kind of game the user asked for — or none), and any key stays changeable with gripforge_gamekit_configure input.actions { overrides: [{ action, keys, buttons?, disabled? }] } — the action of any kit; those entries always win over the scheme. logic chooses where the kits\u2019 logic runs: wasm = logic of the kits in Rust compiled to wasm (Bevy player), ts = TypeScript KitHost (on request only); default wasm (create takes logic too; action=logic without logic reads it, with logic sets it). A game installing a kit without a Rust module runs on the TypeScript KitHost by itself: logic reports runs: ts and fallback: the kits. delete needs confirm=true. Call this first to create or pick the project, then gripforge_gamekit_installed (existing project) or gripforge_gamekit_install. 0 credits.',
     {
-      action: schema.enum(['list', 'create', 'get', 'bind', 'data', 'controls', 'delete']).describe('list | create | get | bind | data | controls | delete.'),
-      project_id: projectId.optional().describe('Game Kit project id (gkp_…). Required for get, bind, data, controls and delete.'),
+      action: schema.enum(['list', 'create', 'get', 'bind', 'data', 'controls', 'logic', 'delete']).describe('list | create | get | bind | data | controls | logic | delete.'),
+      project_id: projectId.optional().describe('Game Kit project id (gkp_…). Required for get, bind, data, controls, logic and delete.'),
       name: schema.string().min(1).max(120).optional().describe('create: project name.'),
       preset: schema.string().max(80).optional().describe('create: preset id whose default kits are installed (gripforge_gamekit_search returns presets).'),
       kits: schema.record(schema.string(), schema.boolean()).optional().describe('create: explicit kit toggles { "vehicle.driveable": true, … } on top of the preset. Unchecking a required kit fails with toggle_requires. The default kits (ui.menu, input.remap, settings.graphics, ui.prompts, ui.endscreen, save.persistence, audio.core, i18n.text, ui.theme, input.virtualpad, display.fullscreen, asset.preload, asset.cache, ai.navigation on web) are included unless set to false here — only when the user asked for it.'),
@@ -550,6 +619,7 @@ export function registerGameKitTools(
       force: schema.boolean().optional().describe('controls: also replace a touch layout or a help bar the game edited (kept by default).'),
       reset: schema.boolean().optional().describe('controls: also drop the key overrides the game wrote itself (kept by default), so the game ends exactly on the scheme — what a game made before the schemes needs to move to one. Preview with dry_run.'),
       controls: schema.string().max(40).optional().describe('create: the control scheme of the kind of game the user asked for (gameplay choices above: one scheme, usually the only one allowed), applied at creation instead of the preset’s own or of the one the kits suggest; none keeps the kits’ own keys.'),
+      logic: schema.enum(PROJECT_LOGIC).optional().describe('create, logic: wasm = logic of the kits in Rust compiled to wasm (Bevy player), ts = TypeScript KitHost (on request only); default wasm. logic without it reads the current choice.'),
       confirm: schema.boolean().optional().describe('delete: must be true. The project, its revisions and data are removed.'),
     },
     { readOnly: false },
@@ -578,6 +648,18 @@ export function registerGameKitTools(
           'PATCH',
           extra?.signal,
         );
+      }
+      if (action === 'logic') {
+        if (args.logic === undefined) {
+          return (async () => {
+            const res = await api(`gamekit-projects/${project}`, args, 'GET', extra?.signal);
+            if (res.isError) return res;
+            const data = projectLogic(res.structuredContent);
+            return { structuredContent: data, content: [{ type: 'text' as const, text: JSON.stringify(data) }] };
+          })();
+        }
+        if (!PROJECT_LOGIC.includes(args.logic as ProjectLogic)) return Promise.resolve(fail(`logic must be ${PROJECT_LOGIC.join(' or ')}.`));
+        return api(`gamekit-projects/${project}`, { workspace_id: args.workspace_id, logic: args.logic }, 'PATCH', extra?.signal);
       }
       if (action === 'controls') {
         if (typeof args.scheme === 'string' && args.scheme) {
