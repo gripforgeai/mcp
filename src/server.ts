@@ -569,7 +569,7 @@ server.tool(
     prompt: z.string().min(3).max(600).describe('Description. "Devil May Cry like enemy" → tagged devil-may-cry, kind=enemy.'),
     provider: z.enum(['tripo', 'meshy', 'gpu']).optional().describe('Default tripo (text) / meshy (image), or the server default. tripo is forced to meshy when concept_item / path / file_url is set. ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
     engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
-    rig: z.boolean().optional().describe('provider gpu only: true = rig with Tripo (only when Tripo is configured on the server); default false = unrigged, meta.rig = none.'),
+    rig: z.boolean().optional().describe('provider gpu only: true = rig with Tripo (only when Tripo is configured on the server); omitted = automatic rig on the GPU box (GripForge biped skeleton, meta.rig = tokenrig; the character stays unrigged with a note if it fails); false = no rig (meta.rig = none).'),
     name: z.string().max(160).optional().describe('Library item name (default: the prompt)'),
     kind: z.enum(['character', 'enemy', 'boss']).optional().describe('character | enemy | boss (boss → enemy + meta.boss)'),
     polycount: z.number().optional().describe('Target triangles. Meshy characters default 8000.'),
