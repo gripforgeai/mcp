@@ -32,6 +32,7 @@ import { registerHeroAbilityTools } from './hero-ability-tools.js';
 import { registerGameCreationTools } from './game-creation-tools.js';
 import { registerGameKitLocalTools } from './gamekit-deliver-local.js';
 import { registerMapUnrealLocalTools } from './map-unreal-local.js';
+import { registerThirdPartyKitTools } from './third-party-kit-tools.js';
 import { registerMapUnrealImportLocalTools } from './map-unreal-import-local.js';
 import { registerMapUnrealExportLocalTools } from './map-unreal-export-local.js';
 import { registerReverseTools } from './game-import-reverse.js';
@@ -50,6 +51,7 @@ registerServerTools((server as unknown as { registerTool: VfxProjectRegister }).
 registerGameKitTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGameKitLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY, userAgent: `gripforge-mcp/${MCP_SELF}` });
 registerMapUnrealLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
+registerThirdPartyKitTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerMapUnrealImportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerMapUnrealExportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerReverseTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));

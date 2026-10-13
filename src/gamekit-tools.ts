@@ -44,6 +44,8 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_game_play_url',
   'gripforge_game_test',
   'gripforge_game_audit',
+  'gripforge_game_world',
+  'gripforge_game_world_scope',
   'gripforge_define_game',
   'gripforge_resolve_requirements',
   'gripforge_audit_game',
@@ -174,7 +176,7 @@ export function registerGameKitTools(
     title: string,
     description: string,
     inputSchema: z.ZodRawShape,
-    opts: { readOnly: boolean; destructive?: boolean },
+    opts: { readOnly: boolean; destructive?: boolean; outputSchema?: z.ZodRawShape },
     callback: Parameters<VfxProjectRegister>[2],
   ) {
     register(
@@ -183,6 +185,7 @@ export function registerGameKitTools(
         title,
         description: withJourney(name, description),
         inputSchema: { ...inputSchema, ...workspace },
+        ...(opts.outputSchema ? { outputSchema: opts.outputSchema } : {}),
         annotations: {
           readOnlyHint: opts.readOnly,
           destructiveHint: Boolean(opts.destructive),
@@ -193,6 +196,44 @@ export function registerGameKitTools(
       callback,
     );
   }
+
+  tool('gripforge_game_world', 'Level plan and world review',
+    'Read source-linked plans (get), author one (plan), construct actual kit content atomically (build, with plan_id, options and expected_revision; dry_run previews; activate explicitly sets the entry scene), save an input journey (journey), inspect without a run (inspect), or queue a real Bevy input/capture test (test). get section:builder with kit returns the provider options; section:journey returns its schema. Builders belong to kits, never genres. 0 credits. test returns a durable job; AI visual review uses a separately quoted Develop and test pass. Generated content remains unverified. Preserve requirements and existing authored content.',
+    { project_id: projectId, action: schema.enum(['get','plan','build','journey','inspect','test']),
+      plan_id: schema.string().max(1000).optional(), section: schema.enum(['builder','journey']).optional(), kit: schema.string().optional(),
+      options: schema.record(schema.string(),schema.unknown()).optional(), journey: schema.record(schema.string(),schema.unknown()).optional(),
+      dry_run: schema.boolean().optional(), activate: schema.boolean().optional(), idempotency_key: schema.string().max(200).optional(),
+      plan: schema.record(schema.string(), schema.unknown()).optional().describe('LevelPlan matching the versioned schema returned by get.'),
+      expected_revision: schema.number().int().min(0).optional().describe('Required for plan, build and journey; current project revision.'),
+      offset: schema.number().int().min(0).optional().describe('Design source pagination for get.') },
+    { readOnly: false, outputSchema: {
+      revision: schema.number().int().optional(), build: schema.string().optional(), status: schema.enum(['planned','preview','implemented_unverified']).optional(), note: schema.string().optional(),
+      schema: schema.record(schema.string(),schema.unknown()).optional(), plan: schema.record(schema.string(),schema.unknown()).optional(),
+      plans: schema.array(schema.record(schema.string(),schema.unknown())).optional(), sources: schema.array(schema.record(schema.string(),schema.unknown())).optional(),
+      designFingerprint: schema.string().nullable().optional(), next_offset: schema.number().nullable().optional(), workflow: schema.string().optional(),
+      structural: schema.record(schema.string(),schema.unknown()).optional(),
+      journey_schema: schema.record(schema.string(),schema.unknown()).optional(), builders: schema.array(schema.record(schema.string(),schema.unknown())).optional(),
+      journeys: schema.array(schema.record(schema.string(),schema.unknown())).optional(), runtime: schema.array(schema.record(schema.string(),schema.unknown())).optional(),
+      plan_fingerprints: schema.record(schema.string(),schema.string()).optional(), journey: schema.record(schema.string(),schema.unknown()).optional(),
+      provider: schema.record(schema.string(),schema.unknown()).optional(), fingerprint: schema.string().optional(),
+      data: schema.array(schema.record(schema.string(),schema.unknown())).optional(), configurations: schema.array(schema.record(schema.string(),schema.unknown())).optional(),
+      documents: schema.array(schema.record(schema.string(),schema.unknown())).optional(), remaining: schema.array(schema.string()).optional(),
+      job: schema.record(schema.string(),schema.unknown()).optional(), status_url: schema.string().optional(),
+      report: schema.object({ schema:schema.literal('gripforge.world-review/1'),fingerprint:schema.string(),mode:schema.enum(['structural','geometry']),
+        checks:schema.array(schema.object({id:schema.string(),kit:schema.string(),location:schema.string(),status:schema.enum(['passed','failed','unsupported']),level:schema.enum(['structural','geometry','gameplay','visual']),explanation:schema.string(),remediation:schema.string(),measured:schema.record(schema.string(),schema.union([schema.number(),schema.string(),schema.boolean()])).optional()})),
+        plans:schema.array(schema.record(schema.string(),schema.unknown())),unverified:schema.array(schema.string()),production:schema.record(schema.string(),schema.unknown()).optional(),runtime:schema.array(schema.record(schema.string(),schema.unknown())).optional() }).optional(),
+      error:schema.string().optional(),code:schema.string().optional(),details:schema.record(schema.string(),schema.unknown()).optional(),
+    } },
+    async (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/world`, args, 'POST', extra?.signal));
+
+  tool('gripforge_game_world_scope', 'Spatial production queue',
+    'Read every spatial obligation in the saved game contract (get), or save region/location classifications, hierarchy, entries and intended connections (put). No genre counts. Old contracts need explicit classifications; declared spatial roles cannot be weakened. Regions require real child locations. Construction and verification remain separate. 0 credits; scope writes use project revision checking. Continue with gripforge_game_world build/journey/test.',
+    { project_id: projectId, action: schema.enum(['get','put']), scope: schema.record(schema.string(),schema.unknown()).optional(), expected_revision: schema.number().int().min(0).optional(), offset: schema.number().int().min(0).optional() },
+    { readOnly: false, outputSchema: { revision:schema.number().int().optional(), status:schema.literal('planned').optional(), designFingerprint:schema.string().optional(), schema:schema.record(schema.string(),schema.unknown()).optional(), scope:schema.record(schema.string(),schema.unknown()).nullable().optional(), groups:schema.array(schema.record(schema.string(),schema.unknown())).optional(), entries:schema.array(schema.record(schema.string(),schema.unknown())).optional(), total:schema.number().optional(), next:schema.array(schema.string()).optional(), next_offset:schema.number().nullable().optional(), note:schema.string().optional(), error:schema.string().optional(), code:schema.string().optional(), details:schema.record(schema.string(),schema.unknown()).optional() } },
+    async (args, extra) => {
+      if (args.action === 'put' && !args.scope) return { isError: true, structuredContent: { code: 'scope_required', error: 'scope is required for put' }, content: [{ type: 'text', text: 'scope is required for put' }] };
+      return api(`gamekit-projects/${enc(args.project_id)}/world`, { ...args, action: 'scope', ...(args.action === 'get' ? { scope: undefined } : {}) }, 'POST', extra?.signal);
+    });
 
   const completionTools = [
     ['define_game', 'define', 'Persist a versioned Game Completion Contract with revision checking. Read get_completion_report for its schema and a proposed contract. Required, optional and excluded capabilities describe the actual intended experience. 0 credits.'],
