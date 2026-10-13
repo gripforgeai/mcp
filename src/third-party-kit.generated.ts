@@ -15,8 +15,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
-  checkThirdPartyKit, declareThirdPartyKit, removeThirdPartyKit, thirdPartyIssues, thirdPartyKits, thirdPartyModuleEntry, thirdPartyModuleFile, thirdPartySummary,
-  type KitModulesIndex, type ThirdPartyGame, type ThirdPartyKitDecl, type ThirdPartyKitManifest,
+  checkThirdPartyKit, declareThirdPartyKit, inspectKitWasm, kitBinaryMode, kitTrust, removeThirdPartyKit, structsVersionText, thirdPartyIssues, thirdPartyKits, thirdPartyModuleEntry, thirdPartyModuleFile, thirdPartySummary,
+  KIT_MODES, type KitMode, type KitModulesIndex, type ThirdPartyGame, type ThirdPartyKitDecl, type ThirdPartyKitManifest,
 } from './third-party.generated.js';
 
 const MAX_MODULE = 64 * 1024 * 1024;
@@ -75,8 +75,31 @@ function installModule(files: GameFiles, decl: ThirdPartyKitDecl, bytes: Uint8Ar
   return join(files.modulesDir, file);
 }
 
-export interface AddKitOptions { game: string; wasm: string; manifest: string; config?: Record<string, unknown>; modules?: string; check?: boolean; cwd?: string; signal?: AbortSignal }
-export interface AddKitReport { game: string; id: string; version: string; source: string; sha256: string; bytes: number; replaced: boolean; checked: boolean; module: string | null; modules: string | null; warnings: string[]; order: string[] }
+export interface AddKitOptions { game: string; wasm?: string; manifest?: string; kit?: string; trust?: KitMode; config?: Record<string, unknown>; modules?: string; check?: boolean; cwd?: string; signal?: AbortSignal }
+export interface AddKitReport { game: string; id: string; version: string; trust: KitMode; source: string; sha256: string; bytes: number; replaced: boolean; checked: boolean; module: string | null; modules: string | null; warnings: string[]; order: string[] }
+
+/** `--trust`: `isolated` (the default) or `common`. */
+export function trustOf(value: unknown): KitMode | undefined {
+  if (value === undefined || value === null || value === false || value === '') return undefined;
+  if (!(KIT_MODES as readonly unknown[]).includes(value)) throw Error(`--trust must be "isolated" (the default: the kit keeps a memory of its own) or "common" (you let it into the memory of the game: it can corrupt the other kits) — got ${JSON.stringify(value)}`);
+  return value as KitMode;
+}
+
+/**
+ * The module and the manifest of one build of a kit: `kit` is the output folder of `gripforge kit build` (or its
+ * build.json); the build taken is the one of `trust`. Throws when that build is not there, naming the one that is.
+ */
+export function pickBuild(kit: string, trust: KitMode, cwd: string): { wasm: string; manifest: string } {
+  let file = isAbsolute(kit) ? kit : resolve(cwd, kit);
+  if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'build.json');
+  if (!existsSync(file)) throw Error(`${file}: not found — --kit takes the output folder of "gripforge kit build <kit folder>" (it holds build.json)`);
+  let build: { schema?: string; builds?: Record<string, { wasm?: string; manifest?: string } | undefined> };
+  try { build = JSON.parse(readFileSync(file, 'utf8')) as typeof build; } catch (error) { throw Error(`${file}: not JSON (${(error as Error).message})`); }
+  if (build.schema !== 'gripforge.kit-build/1' || !build.builds) throw Error(`${file}: not the build.json of gripforge kit build`);
+  const entry = build.builds[trust], have = Object.keys(build.builds);
+  if (!entry?.wasm || !entry.manifest) throw Error(`${file}: no ${trust} build of this kit (it holds: ${have.join(', ') || 'none'}) — ${trust === 'common' ? 'build it: gripforge kit build <kit folder> --mode common' : 'build it: gripforge kit build <kit folder> --mode isolated; or, if you trust this kit with the memory of the game, add it with --trust common'}`);
+  return { wasm: join(dirname(file), entry.wasm), manifest: join(dirname(file), entry.manifest) };
+}
 
 /**
  * Declares a third-party kit in a game: reads the module and its manifest, checks them (against each other, against
@@ -85,26 +108,31 @@ export interface AddKitReport { game: string; id: string; version: string; sourc
  */
 export async function addKit(options: AddKitOptions): Promise<AddKitReport> {
   const cwd = options.cwd ?? process.cwd(), files = openGame(isAbsolute(options.game) ? options.game : resolve(cwd, options.game), options.modules ? resolve(cwd, options.modules) : undefined);
-  if (!options.wasm) throw Error('--wasm is needed: the kit module (a .wasm file or an http(s) URL).');
-  if (!options.manifest) throw Error('--manifest is needed: the kit.json of the kit (a file or an http(s) URL).');
-  const bytes = await readSource(options.wasm, cwd, options.signal);
+  const picked = options.kit ? pickBuild(options.kit, options.trust ?? 'isolated', cwd) : null;
+  const wasmSource = picked?.wasm ?? options.wasm, manifestSource = picked?.manifest ?? options.manifest;
+  if (!wasmSource) throw Error('the kit is needed: --kit <output folder of gripforge kit build>, or --wasm <.wasm file or http(s) URL> with --manifest <its .kit.json>.');
+  if (!manifestSource) throw Error('--manifest is needed: the .kit.json written beside the module by gripforge kit build (a file or an http(s) URL).');
+  const bytes = await readSource(wasmSource, cwd, options.signal);
   let manifest: ThirdPartyKitManifest;
-  try { manifest = JSON.parse(new TextDecoder().decode(await readSource(options.manifest, cwd, options.signal))) as ThirdPartyKitManifest; } catch (error) { throw Error(`${options.manifest}: ${(error as Error).message}`); }
+  try { manifest = JSON.parse(new TextDecoder().decode(await readSource(manifestSource, cwd, options.signal))) as ThirdPartyKitManifest; } catch (error) { throw Error(`${manifestSource}: ${(error as Error).message}`); }
+  // The trust the maker of the game gives this kit: asked here, else kept from the previous declaration, else none (isolated).
+  const before = thirdPartyKits(files.game.project).find((k) => k.id === manifest?.id);
+  const trust: KitMode = options.trust ?? (before ? kitTrust(before) : 'isolated');
   const reserved = (id: string) => !!files.modules?.kits?.[id] && !files.modules.kits[id]!.thirdParty;
-  const check = checkThirdPartyKit({ manifest, wasm: bytes, modules: files.modules, reserved });
+  const check = checkThirdPartyKit({ manifest, wasm: bytes, modules: files.modules, reserved, trust });
   if (check.issues.length) throw Error(check.issues.join('\n'));
   const digest = sha256(bytes), replaced = thirdPartyKits(files.game.project).some((k) => k.id === manifest.id);
   const vendored = `${THIRD_PARTY_DIR}/${manifest.id}-${manifest.version}.wasm`;
-  const source = isUrl(options.wasm) ? options.wasm : `./${vendored}`;
-  const decl: ThirdPartyKitDecl = { id: manifest.id, version: manifest.version, source, sha256: digest, bytes: bytes.length, manifest };
+  const source = isUrl(wasmSource) ? wasmSource : `./${vendored}`;
+  const decl: ThirdPartyKitDecl = { id: manifest.id, version: manifest.version, source, sha256: digest, bytes: bytes.length, trust, manifest };
   const game = declareThirdPartyKit(files.game, decl, { config: options.config });
   const issues = thirdPartyIssues(game);
   if (issues.length) throw Error(issues.join('\n'));
   let module: string | null = null;
   if (!options.check) {
-    if (!isUrl(options.wasm)) {
-      const before = thirdPartyKits(files.game.project).find((k) => k.id === manifest.id)?.source;
-      if (before && before !== source && before.startsWith(`./${THIRD_PARTY_DIR}/`)) rmSync(join(files.dir, before), { force: true });
+    if (!isUrl(wasmSource)) {
+      const previous = before?.source;
+      if (previous && previous !== source && previous.startsWith(`./${THIRD_PARTY_DIR}/`)) rmSync(join(files.dir, previous), { force: true });
       mkdirSync(join(files.dir, THIRD_PARTY_DIR), { recursive: true });
       writeFileSync(join(files.dir, vendored), bytes);
     }
@@ -112,10 +140,11 @@ export async function addKit(options: AddKitOptions): Promise<AddKitReport> {
     saveGame(files, game);
   }
   if (!files.modules) check.warnings.push('this game has no kit modules beside it (no runtime-rust/kit-modules/ or kit-modules/ with a kit-modules.json): the kit was checked against its manifest only. Pass --modules <folder of kit modules> to check it against a core now; the web export checks it in any case');
-  return { game: files.file, id: decl.id, version: decl.version, source, sha256: digest, bytes: bytes.length, replaced, checked: !!options.check, module, modules: files.modulesDir, warnings: check.warnings, order: game.lock.order ?? [] };
+  if (trust === 'common') check.warnings.push(`${decl.id} is trusted with the common memory: it runs in the memory of the core and of the other kits and is NOT isolated — a fault in it can corrupt the game. Declare its isolated build (no --trust) for a kit you do not trust.`);
+  return { game: files.file, id: decl.id, version: decl.version, trust, source, sha256: digest, bytes: bytes.length, replaced, checked: !!options.check, module, modules: files.modulesDir, warnings: check.warnings, order: game.lock.order ?? [] };
 }
 
-export interface VerifyKitReport { game: string; ok: boolean; modules: string | null; kits: Array<{ id: string; version: string; source: string; sha256: string; ok: boolean; issues: string[]; warnings: string[] }>; issues: string[] }
+export interface VerifyKitReport { game: string; ok: boolean; modules: string | null; kits: Array<{ id: string; version: string; trust: KitMode; source: string; sha256: string; ok: boolean; issues: string[]; warnings: string[] }>; issues: string[] }
 
 /**
  * Verifies the declared third-party kits of a game (one with `id`): each module is read again from its source and
@@ -134,7 +163,7 @@ export async function verifyKits(options: { game: string; id?: string; modules?:
       const bytes = await readSource(decl.source, files.dir, options.signal), digest = sha256(bytes);
       if (digest !== decl.sha256) issues.push(`the module at ${decl.source} has sha256 ${digest}, the game declares ${decl.sha256}: it is not the binary that was declared (add it again to accept the new one)`);
       else {
-        const check = checkThirdPartyKit({ manifest: decl.manifest, wasm: bytes, modules: files.modules });
+        const check = checkThirdPartyKit({ manifest: decl.manifest, wasm: bytes, modules: files.modules, trust: kitTrust(decl) });
         issues.push(...check.issues); warnings.push(...check.warnings);
       }
     } catch (error) { issues.push(`the module cannot be read: ${(error as Error).message}`); }
@@ -144,10 +173,53 @@ export async function verifyKits(options: { game: string; id?: string; modules?:
       if (!existsSync(path)) issues.push(`kit-modules.json names ${entry.wasm}, which is not in ${files.modulesDir}`);
       else { const found = sha256(readFileSync(path)); if (found !== decl.sha256) issues.push(`the kit module ${entry.wasm} has sha256 ${found}, the game declares ${decl.sha256}: the kit modules do not hold the declared binary (gripforge kit add puts it there again)`); }
     }
-    kits.push({ id: decl.id, version: decl.version, source: decl.source, sha256: decl.sha256, ok: !issues.length, issues, warnings });
+    kits.push({ id: decl.id, version: decl.version, trust: kitTrust(decl), source: decl.source, sha256: decl.sha256, ok: !issues.length, issues, warnings });
   }
   const rest = options.id ? [] : all.filter((line) => !declared.some((k) => line.startsWith(`${k.id}: `)));
   return { game: files.file, ok: kits.every((k) => k.ok) && !rest.length, modules: files.modulesDir, kits, issues: rest };
+}
+
+export interface VerifyBuildReport { ok: boolean; id: string | null; version: string | null; mode: KitMode | null; wasm: string; sha256: string; bytes: number; modules: string | null; contract: { expected: string | null; found: string | null }; structs: { expected: string | null; found: string | null }; issues: string[]; warnings: string[] }
+
+/**
+ * Verifies one build of a kit — no game needed — against the core it is meant for (`modules`: a folder of kit
+ * modules, or its kit-modules.json): the version of the contract and of every interface it consumes, then the
+ * structures of the contract, each compared with the core's. Every refusal names what was expected and what was
+ * found. Without `modules` the binary is checked against its manifest only.
+ */
+export async function verifyBuild(options: { wasm?: string; manifest?: string; kit?: string; trust?: KitMode; modules?: string; cwd?: string; signal?: AbortSignal }): Promise<VerifyBuildReport> {
+  const cwd = options.cwd ?? process.cwd();
+  const picked = options.kit ? pickBuild(options.kit, options.trust ?? 'isolated', cwd) : null;
+  const wasmSource = picked?.wasm ?? options.wasm, manifestSource = picked?.manifest ?? options.manifest;
+  if (!wasmSource || !manifestSource) throw Error('a build is needed: --kit <output folder of gripforge kit build> [--trust common], or --wasm <file|url> with --manifest <its .kit.json>.');
+  const bytes = await readSource(wasmSource, cwd, options.signal);
+  let manifest: ThirdPartyKitManifest;
+  try { manifest = JSON.parse(new TextDecoder().decode(await readSource(manifestSource, cwd, options.signal))) as ThirdPartyKitManifest; } catch (error) { throw Error(`${manifestSource}: ${(error as Error).message}`); }
+  let modulesDir: string | null = null, modules: KitModulesIndex | null = null;
+  if (options.modules) {
+    let file = isAbsolute(options.modules) ? options.modules : resolve(cwd, options.modules);
+    if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'kit-modules.json');
+    if (!existsSync(file)) throw Error(`${file}: no kit-modules.json — --modules must be a folder of kit modules (of an exported game: <game>/runtime-rust/kit-modules)`);
+    modulesDir = dirname(file); modules = JSON.parse(readFileSync(file, 'utf8')) as KitModulesIndex;
+  }
+  const check = checkThirdPartyKit({ manifest, wasm: bytes, modules, trust: options.trust });
+  let mode: KitMode | null = null, found: string | null = null;
+  try { const info = inspectKitWasm(bytes); mode = kitBinaryMode(info); found = info.structs ? structsVersionText(info.structs.version) : null; } catch { /* reported by the check */ }
+  const digest = sha256(bytes);
+  if (manifest?.sha256 && manifest.sha256 !== digest) check.issues.push(`sha256: expected ${manifest.sha256} (its manifest), found ${digest} — the module is not the one this manifest was written for`);
+  if (!modules) check.warnings.push('no core to check against: pass --modules <folder of kit modules> to compare the contract and the structures with the core of a game');
+  const provided = (manifest?.provides ?? []).find((p) => p.startsWith('kithost.kit@')) ?? null;
+  return { ok: !check.issues.length, id: manifest?.id ?? null, version: manifest?.version ?? null, mode, wasm: wasmSource, sha256: digest, bytes: bytes.length, modules: modulesDir,
+    contract: { expected: modules?.contract ?? null, found: provided }, structs: { expected: modules?.structs?.contract ?? null, found }, issues: check.issues, warnings: check.warnings };
+}
+
+export function verifyBuildSummary(r: VerifyBuildReport): string {
+  const lines = [`${r.ok ? 'ok  ' : 'FAIL'} ${r.id ?? '?'}@${r.version ?? '?'}  ${r.mode ?? 'not a kit module of a mode a game loads'}  sha256 ${r.sha256.slice(0, 16)}…  (${r.bytes} bytes)`,
+    `     contract    expected ${r.contract.expected ?? '— (no core given)'}, found ${r.contract.found ?? 'none'}`,
+    `     structures  expected ${r.structs.expected ?? '— (no core given)'}, found ${r.structs.found ?? 'none'}`];
+  for (const i of r.issues) lines.push(`     - ${i}`);
+  for (const w of r.warnings) lines.push(`     warning: ${w}`);
+  return lines.join('\n');
 }
 
 /** The declared third-party kits of a game. */
@@ -180,7 +252,13 @@ export function removeKit(options: { game: string; id: string; modules?: string;
 
 export const KIT_USAGE = `Usage:
   gripforge kit api <kit-id> [--section config,hooks,…] [--full] [--json]      API reference of a GripForge kit
-  gripforge kit add <game> --wasm <file|url> --manifest <kit.json|url> [--config '<json>'] [--modules <dir>] [--check] [--json]
+  gripforge kit build <kit folder> [--out <dir>] [--mode isolated|common|both] [--install] [--sdk <dir>] [--target-dir <dir>] [--jobs <n>] [--json]
+                                                                               compile a kit of your own on the build base (both builds by default)
+  gripforge kit socle [--install] [--json]                                     the build base: toolchain, options, contract, structures; is it ready here
+  gripforge kit add <game> --kit <build folder> [--trust common] [--config '<json>'] [--modules <dir>] [--check] [--json]
+  gripforge kit add <game> --wasm <file|url> --manifest <.kit.json|url> [--trust common] …
+                                                                               --trust common: the kit enters the memory of the game (not isolated)
+  gripforge kit verify --kit <build folder> [--trust common] --modules <dir>   one build against a core: contract and structures (expected / found)
   gripforge kit verify <game> [kit-id] [--modules <dir>] [--json]              exit code 2 when a kit does not verify
   (a refused command exits with 1 and writes nothing)
   gripforge kit list <game> [--json]
@@ -188,7 +266,7 @@ export const KIT_USAGE = `Usage:
 <game>: a game.json, or the folder that holds it (an exported web game). Guide: gripforge docs kit-third-party`;
 
 export function addSummary(r: AddKitReport): string {
-  const lines = [`${r.checked ? 'Checked' : r.replaced ? 'Replaced' : 'Added'} ${r.id}@${r.version} ${r.checked ? 'for' : 'in'} ${r.game}`, `  source  ${r.source}`, `  sha256  ${r.sha256}  (${r.bytes} bytes)`, `  order   ${r.order.join(' → ')}`];
+  const lines = [`${r.checked ? 'Checked' : r.replaced ? 'Replaced' : 'Added'} ${r.id}@${r.version} ${r.checked ? 'for' : 'in'} ${r.game}`, `  trust   ${r.trust === 'common' ? 'common — in the memory of the game, NOT isolated' : 'isolated — a memory of its own'}`, `  source  ${r.source}`, `  sha256  ${r.sha256}  (${r.bytes} bytes)`, `  order   ${r.order.join(' → ')}`];
   if (r.module) lines.push(`  module  ${r.module}`);
   for (const w of r.warnings) lines.push(`  warning: ${w}`);
   if (!r.checked) lines.push('', 'The game now declares this kit: its lock froze the version and the sha256, and a page that plays the game loads', 'the kit modules by itself (one wasm per kit). Its config: "config" of its entry in project.installed.', `Check it again at any time: gripforge kit verify ${r.game}`);
@@ -199,7 +277,7 @@ export function verifySummary(r: VerifyKitReport): string {
   const lines = [`Third-party kits of ${r.game}${r.modules ? `\n  kit modules: ${r.modules}` : ''}`];
   if (!r.kits.length && !r.issues.length) lines.push('  none declared');
   for (const k of r.kits) {
-    lines.push(`  ${k.ok ? 'ok  ' : 'FAIL'} ${k.id}@${k.version}  sha256 ${k.sha256.slice(0, 16)}…  ${k.source}`);
+    lines.push(`  ${k.ok ? 'ok  ' : 'FAIL'} ${k.id}@${k.version}  ${k.trust}  sha256 ${k.sha256.slice(0, 16)}…  ${k.source}`);
     for (const i of k.issues) lines.push(`       - ${i}`);
     for (const w of k.warnings) lines.push(`       warning: ${w}`);
   }
@@ -208,8 +286,8 @@ export function verifySummary(r: VerifyKitReport): string {
 }
 
 export function listSummary(r: ReturnType<typeof listKits>): string {
-  if (!r.kits.length) return `No third-party kit declared in ${r.game}.\nAdd one: gripforge kit add <game> --wasm <file|url> --manifest <kit.json>`;
-  return [`Third-party kits of ${r.game}`, ...r.kits.map((k) => `  ${k.id}@${k.version}  ${k.enabled ? 'enabled' : k.installed ? 'disabled' : 'NOT INSTALLED'}${k.locked ? '' : '  NOT LOCKED'}  sha256 ${k.sha256.slice(0, 16)}…  ${k.source}\n      mounts   ${k.mounts ? `#${k.mounts} of lock.order` : 'never (not in lock.order)'}\n      config   ${JSON.stringify(k.config)}${k.requires.length ? `\n      requires ${k.requires.join(', ')}` : ''}${k.optional.length ? `\n      optional ${k.optional.join(', ')}` : ''}${k.services.length ? `\n      serves   ${k.services.join(', ')}` : ''}`)].join('\n');
+  if (!r.kits.length) return `No third-party kit declared in ${r.game}.\nBuild one: gripforge kit build <kit folder>   then add it: gripforge kit add <game> --kit <build folder>`;
+  return [`Third-party kits of ${r.game}`, ...r.kits.map((k) => `  ${k.id}@${k.version}  ${k.trust === 'common' ? 'COMMON MEMORY (trusted)' : 'isolated'}  ${k.enabled ? 'enabled' : k.installed ? 'disabled' : 'NOT INSTALLED'}${k.locked ? '' : '  NOT LOCKED'}  sha256 ${k.sha256.slice(0, 16)}…  ${k.source}\n      mounts   ${k.mounts ? `#${k.mounts} of lock.order` : 'never (not in lock.order)'}\n      config   ${JSON.stringify(k.config)}${k.requires.length ? `\n      requires ${k.requires.join(', ')}` : ''}${k.optional.length ? `\n      optional ${k.optional.join(', ')}` : ''}${k.services.length ? `\n      serves   ${k.services.join(', ')}` : ''}`)].join('\n');
 }
 
 /** `gripforge kit add|verify|list|remove …` (the `api` verb is in docs.ts). */
@@ -219,8 +297,13 @@ export async function kitCommand(args: string[], flags: Record<string, string | 
   if (verb === 'add' && game && args.length === 2) {
     let config: Record<string, unknown> | undefined;
     if (typeof flags.config === 'string') { try { config = JSON.parse(flags.config) as Record<string, unknown>; } catch { throw Error('--config must be a JSON object, like \'{"every":3}\''); } if (!config || typeof config !== 'object' || Array.isArray(config)) throw Error('--config must be a JSON object'); }
-    const report = await addKit({ game, wasm: String(flags.wasm ?? ''), manifest: String(flags.manifest ?? ''), config, modules, check: !!flags.check, signal });
+    const report = await addKit({ game, wasm: typeof flags.wasm === 'string' ? flags.wasm : undefined, manifest: typeof flags.manifest === 'string' ? flags.manifest : undefined, kit: typeof flags.kit === 'string' ? flags.kit : undefined, trust: trustOf(flags.trust), config, modules, check: !!flags.check, signal });
     print(report, addSummary(report)); return;
+  }
+  // One build against a core, no game: `kit verify --kit <build folder> --modules <dir>`.
+  if (verb === 'verify' && !game && (typeof flags.kit === 'string' || typeof flags.wasm === 'string')) {
+    const report = await verifyBuild({ wasm: typeof flags.wasm === 'string' ? flags.wasm : undefined, manifest: typeof flags.manifest === 'string' ? flags.manifest : undefined, kit: typeof flags.kit === 'string' ? flags.kit : undefined, trust: trustOf(flags.trust), modules, signal });
+    print(report, verifyBuildSummary(report)); if (!report.ok) process.exitCode = 2; return;
   }
   if (verb === 'verify' && game && args.length <= 3) { const report = await verifyKits({ game, id, modules, signal }); print(report, verifySummary(report)); if (!report.ok) process.exitCode = 2; return; }
   if (verb === 'list' && game && args.length === 2) { const report = listKits({ game }); print(report, listSummary(report)); return; }

@@ -3,11 +3,13 @@
  * Third-party kits of a game (docs/kit-third-party.md): a kit of game logic that is not one of GripForge's, compiled
  * alone into one `.wasm` (a kit logic module, docs/kit-modules.md). A game plays one only when it **declares** it:
  *
- *   project.thirdPartyKits[]   { id, version, source, sha256, bytes, manifest }   where the module comes from
+ *   project.thirdPartyKits[]   { id, version, source, sha256, bytes, trust, manifest }   where the module comes from
+ *                              `trust`: "isolated" (the default: the kit keeps a memory of its own) or "common"
+ *                              (the game lets it into the memory of the core and of the other kits)
  *   project.installed[]        { id, version, enabled, config }                    its config, as for any kit
  *   lock.order                 its place in the mount order
  *   lock.kits[id]              { version, enabled }
- *   lock.thirdParty[id]        { version, sha256, bytes }                          frozen: what was checked
+ *   lock.thirdParty[id]        { version, sha256, bytes, trust }                   frozen: what was checked
  *
  * This file is the whole rule, with no dependency (no file system, no network, no registry): the page, the web
  * export, the CLI and the MCP client all run it. The CLI and the MCP client are published without dependencies, so
@@ -16,8 +18,23 @@
  */
 
 export const THIRD_PARTY_KIT_SCHEMA = 'gripforge.kit-module/1';
-/** The exports of the calls contract a kit module must have (gripforge-kit-guest `export_kit!`). */
-export const KIT_MODULE_EXPORTS = ['memory', 'gf_alloc', 'gf_on_bridge', 'gf_calls_init'] as const;
+/** The exports of the calls contract every kit module has (gripforge-kit-guest `export_kit!` / `isolated_kit!`). */
+export const KIT_MODULE_EXPORTS = ['gf_calls_init'] as const;
+/**
+ * The two ways a third-party kit module lives in a game (docs/kit-third-party.md), and what its binary exports:
+ * - `isolated` — a memory of its own; it speaks to the core across the two memories, on the structures of the
+ *   contract. It cannot read or write the memory of the game. The default.
+ * - `common` — relocatable, placed in the memory of the core and of the other kits, as a kit of GripForge is. Fast,
+ *   and not isolated: a fault in it can corrupt the game. Only when the game says it trusts the kit.
+ */
+export const KIT_MODES = ['isolated', 'common'] as const;
+export type KitMode = (typeof KIT_MODES)[number];
+export const KIT_MODE_EXPORTS: Record<KitMode, readonly string[]> = {
+  isolated: ['memory', 'gf_calls_init', 'gfx_iso_enter', 'gfx_iso_alloc', 'gfx_iso_free'],
+  common: ['gf_calls_init', 'gfx_mem_enter'],
+};
+/** What a relocatable kit module may import from `env` (the host gives exactly these). */
+export const KIT_COMMON_ENV = ['memory', '__memory_base', '__table_base', '__stack_pointer', '__indirect_function_table'] as const;
 /** The kits that live in the core (`kithost.core`): they have no module of their own. */
 export const KITS_IN_CORE: readonly string[] = ['game.engine'];
 
@@ -32,6 +49,15 @@ export interface ThirdPartyKitManifest {
   services?: string[];
   requires?: string[];
   optional?: string[];
+  /** Written by `gripforge kit build`: how the binary beside this manifest lives in a game. */
+  memory?: KitMode;
+  /** Written by `gripforge kit build`: the structures contract the binary was built against (`major.minor`). */
+  structs?: string;
+  /** Written by `gripforge kit build`: the file, its fingerprint, the base it was built on. */
+  wasm?: string;
+  sha256?: string;
+  bytes?: number;
+  built?: Record<string, unknown>;
 }
 
 /** One declared third-party kit (`project.thirdPartyKits[]`). */
@@ -43,11 +69,20 @@ export interface ThirdPartyKitDecl {
   /** SHA-256 of the module, 64 hexadecimal digits: what is loaded must have it. */
   sha256: string;
   bytes: number;
+  /**
+   * Whether the game trusts this kit with the common memory. `"isolated"` (or absent): no — the kit keeps a memory
+   * of its own. `"common"`: yes — it is loaded as a kit of GripForge is and can corrupt the others. Decided by the
+   * maker of the game, kit by kit; the binary declared must be the build of that mode.
+   */
+  trust?: KitMode;
   manifest: ThirdPartyKitManifest;
 }
 
-/** `lock.thirdParty[id]`: the version and the fingerprint the lock froze. */
-export interface ThirdPartyKitLock { version: string; sha256: string; bytes: number }
+/** `lock.thirdParty[id]`: the version, the fingerprint and the trust the lock froze. */
+export interface ThirdPartyKitLock { version: string; sha256: string; bytes: number; trust?: KitMode }
+
+/** The mode a declaration asks: `trust`, isolated when it says nothing. */
+export const kitTrust = (decl: { trust?: unknown } | null | undefined): KitMode => (decl?.trust === 'common' ? 'common' : 'isolated');
 
 /** The part of a game file this module reads and writes (a project bundle: `{ project, lock }`). */
 export interface ThirdPartyGame {
@@ -67,9 +102,10 @@ export interface ThirdPartyGame {
 export interface KitModulesIndex {
   schema?: string;
   contract?: string;
-  core?: { name?: string; version?: string; wasm?: string; provides?: string[] } | null;
-  kits?: Record<string, { version?: string; wasm?: string; bytes?: number; hash?: string; sha256?: string; thirdParty?: boolean } | undefined>;
-  merged?: { wasm?: string; kits?: string[] } | null;
+  core?: { name?: string; version?: string; wasm?: string; provides?: string[]; memory?: string } | null;
+  kits?: Record<string, { version?: string; wasm?: string; bytes?: number; hash?: string; sha256?: string; thirdParty?: boolean; memory?: string } | undefined>;
+  /** The structures of the contract as this core lays them out (tools/kit-modules/build.mjs). */
+  structs?: { contract?: string; structs?: KitStruct[] } | null;
 }
 
 const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
@@ -126,26 +162,110 @@ export function kitManifestIssues(kit: unknown): string[] {
 
 // ─── the binary ──────────────────────────────────────────────────────────────
 
-/** What a kit module says of itself: its exports and the lines of its custom section `gripforge.calls`. */
-export interface KitWasmInfo { exports: string[]; contracts: string[] }
+/** One structure of the contract as a binary (or a core) lays it out. `version`: `major.minor`, or packed (`major << 16 | minor`). */
+export interface KitStruct { name: string; id: number; version: number | string; size: number; align: number; fields: Array<{ name: string; offset: number; size: number }> }
+/** The structures table a module carries (custom section `gripforge.structs`). `version`: packed. */
+export interface KitStructs { version: number; structs: KitStruct[] }
 
-/** Reads the export names and the `gripforge.calls` section of a WebAssembly module. Throws when it is not one. */
+/**
+ * What a kit module says of itself: its exports, its imports, the lines of its custom section `gripforge.calls`,
+ * whether it is relocatable (section `dylink.0`: built for the common memory), and its structures table.
+ */
+export interface KitWasmInfo { exports: string[]; contracts: string[]; imports: Array<{ module: string; name: string; kind: number; shared?: boolean }>; relocatable: boolean; structs: KitStructs | null }
+
+const packedVersion = (v: number | string): number => { if (typeof v === 'number') return v >>> 0; const [major, minor = '0'] = String(v).split('.'); return ((Number(major) << 16) | Number(minor)) >>> 0; };
+/** `major.minor` of a structures version (packed or text). */
+export const structsVersionText = (v: number | string): string => { const p = packedVersion(v); return `${p >>> 16}.${p & 0xffff}`; };
+
+/** Reads a structures table (the bytes of the section `gripforge.structs`, gripforge-kitcall src/layout.rs). */
+export function readKitStructs(bytes: Uint8Array): KitStructs {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const name = (at: number, width: number): string => { let s = ''; for (let i = 0; i < width && bytes[at + i]; i++) s += String.fromCharCode(bytes[at + i]!); return s; };
+  if (bytes.length < 16 || dv.getUint32(0, true) !== 0x54534647) throw new Error('gripforge.structs: not a structures table (magic GFST missing)');
+  const out: KitStructs = { version: dv.getUint32(4, true), structs: [] };
+  let at = 16;
+  for (let i = dv.getUint32(8, true); i > 0; i--) {
+    if (at + 44 > bytes.length) throw new Error('gripforge.structs: the table is cut short');
+    const s: KitStruct = { name: name(at, 24), id: dv.getUint32(at + 24, true), version: dv.getUint32(at + 28, true), size: dv.getUint32(at + 32, true), align: dv.getUint32(at + 36, true), fields: [] };
+    let fields = dv.getUint32(at + 40, true);
+    at += 44;
+    if (at + fields * 24 > bytes.length) throw new Error('gripforge.structs: the table is cut short');
+    for (; fields > 0; fields--, at += 24) s.fields.push({ name: name(at, 16), offset: dv.getUint32(at + 16, true), size: dv.getUint32(at + 20, true) });
+    out.structs.push(s);
+  }
+  return out;
+}
+
+/**
+ * Why a kit whose structures table is `found` does not fit a core (or a build base) whose structures are
+ * `expected` — null when it fits. Named: the contract version expected and found, then the structure and the field.
+ * The rule of the loader (native/gripforge-runtime/web/module-calls.mjs `structsMismatch`): same major, the kit's
+ * minor not above; each structure the kit carries at the same version and the same layout.
+ */
+export function kitStructsMismatch(expected: { version: number | string; structs: KitStruct[] } | null | undefined, found: KitStructs | null, who = 'the core'): string | null {
+  if (!expected) return null;
+  const want = packedVersion(expected.version);
+  if (!found) return `structures contract: expected ${structsVersionText(want)} (${who}), found none — the binary carries no structures table (custom section gripforge.structs): it was not built on the contract (gripforge kit build)`;
+  if (found.version >>> 16 !== want >>> 16 || (found.version & 0xffff) > (want & 0xffff)) return `structures contract: expected ${structsVersionText(want)} (${who}), found ${structsVersionText(found.version)} — ${found.version >>> 16 !== want >>> 16 ? 'another major: the two do not read the same memory' : 'the kit needs a later minor than this core has'}; rebuild the kit against this contract (gripforge kit build)`;
+  for (const s of found.structs) {
+    const o = expected.structs.find((x) => x.id === s.id);
+    if (!o) return `structure ${s.name} (number ${s.id}): found in the kit, not one of ${who}'s (structures contract ${structsVersionText(want)})`;
+    if (packedVersion(o.version) !== packedVersion(s.version)) return `structure ${s.name}: expected version ${structsVersionText(o.version)} (${who}), found ${structsVersionText(s.version)}`;
+    if (o.size !== s.size || o.align !== s.align) return `structure ${o.name}@${structsVersionText(o.version)}: expected size ${o.size} align ${o.align}, found size ${s.size} align ${s.align}`;
+    for (const f of o.fields) {
+      const g = s.fields.find((x) => x.name === f.name);
+      if (!g) return `structure ${o.name}@${structsVersionText(o.version)}: field ${f.name} expected, not found`;
+      if (g.offset !== f.offset || g.size !== f.size) return `structure ${o.name}@${structsVersionText(o.version)}: field ${f.name} expected at ${f.offset} (${f.size} bytes), found at ${g.offset} (${g.size} bytes)`;
+    }
+    const extra = s.fields.find((g) => !o.fields.some((f) => f.name === g.name));
+    if (extra) return `structure ${o.name}@${structsVersionText(o.version)}: field ${extra.name} found, not expected`;
+  }
+  return null;
+}
+
+/** Reads the exports, the imports and the custom sections of a WebAssembly module. Throws when it is not one. */
 export function inspectKitWasm(bytes: Uint8Array): KitWasmInfo {
   if (bytes.length < 8 || bytes[0] !== 0x00 || bytes[1] !== 0x61 || bytes[2] !== 0x73 || bytes[3] !== 0x6d) throw new Error('not a WebAssembly module (no \\0asm header)');
   let at = 8;
   const leb = (): number => { let result = 0, shift = 0; for (;;) { if (at >= bytes.length) throw new Error('truncated WebAssembly module'); const b = bytes[at++]!; result += (b & 0x7f) * 2 ** shift; shift += 7; if (!(b & 0x80)) return result; } };
   const text = (from: number, to: number): string => { let s = ''; for (let i = from; i < to; i++) s += String.fromCharCode(bytes[i]!); try { return decodeURIComponent(escape(s)); } catch { return s; } };
   const name = (): string => { const n = leb(), from = at; at += n; if (at > bytes.length) throw new Error('truncated WebAssembly module'); return text(from, at); };
-  const info: KitWasmInfo = { exports: [], contracts: [] };
+  const limits = (): boolean => { const flags = leb(); leb(); if (flags & 1) leb(); return !!(flags & 2); };
+  const info: KitWasmInfo = { exports: [], contracts: [], imports: [], relocatable: false, structs: null };
   while (at < bytes.length) {
     const id = bytes[at++]!, size = leb(), end = at + size;
     if (end > bytes.length) throw new Error('truncated WebAssembly module');
     if (id === 7) { for (let n = leb(); n > 0; n--) { info.exports.push(name()); at++; leb(); } }
-    else if (id === 0 && name() === 'gripforge.calls') info.contracts.push(...text(at, end).split('\n').map((l) => l.trim()).filter(Boolean));
+    else if (id === 2) {
+      for (let n = leb(); n > 0; n--) {
+        const module = name(), field = name(), kind = bytes[at++]!;
+        let shared: boolean | undefined;
+        if (kind === 0) leb(); else if (kind === 1) { at++; limits(); } else if (kind === 2) shared = limits(); else if (kind === 3) at += 2; else { at++; leb(); }
+        info.imports.push({ module, name: field, kind, ...(shared === undefined ? {} : { shared }) });
+      }
+    } else if (id === 0) {
+      const section = name();
+      if (section === 'gripforge.calls') info.contracts.push(...text(at, end).split('\n').map((l) => l.trim()).filter(Boolean));
+      else if (section === 'dylink.0') info.relocatable = true;
+      else if (section === 'gripforge.structs') info.structs = readKitStructs(bytes.subarray(at, end));
+    }
     at = end;
   }
   return info;
 }
+
+/**
+ * How a kit binary lives in a game, from what it is: `common` (relocatable), `isolated` (it exports the entry
+ * across memories), or `null` — neither: not a kit module a game can declare (there is no third way to load one).
+ */
+export function kitBinaryMode(info: KitWasmInfo): KitMode | null {
+  if (info.relocatable) return 'common';
+  if (info.exports.includes('gfx_iso_enter')) return 'isolated';
+  return null;
+}
+
+/** The message for a binary that is neither build. */
+export const NOT_A_KIT_BINARY = 'the binary is not a kit module a game can declare: it is neither relocatable (the build for the common memory) nor isolated (it does not export gfx_iso_enter) — build the kit from its source with "gripforge kit build <kit folder>" (it writes the isolated build and the build for the common memory)'
 
 /** What `checkThirdPartyKit` found: `issues` refuse the kit, `warnings` do not. */
 export interface ThirdPartyCheck { issues: string[]; warnings: string[] }
@@ -159,16 +279,41 @@ export interface ThirdPartyCheck { issues: string[]; warnings: string[] }
  * - every `requires` is a kit of the folder at a matching version (`optional`: a warning);
  * - the id is not the id of a GripForge kit.
  */
-export function checkThirdPartyKit(input: { manifest: unknown; wasm: Uint8Array; modules?: KitModulesIndex | null; reserved?: (id: string) => boolean }): ThirdPartyCheck {
+export function checkThirdPartyKit(input: { manifest: unknown; wasm: Uint8Array; modules?: KitModulesIndex | null; reserved?: (id: string) => boolean; trust?: KitMode; structs?: { version: number | string; structs: KitStruct[] } | null }): ThirdPartyCheck {
   const issues = kitManifestIssues(input.manifest), warnings: string[] = [];
   if (issues.length) return { issues, warnings };
   const kit = input.manifest as ThirdPartyKitManifest;
   let info: KitWasmInfo;
-  try { info = inspectKitWasm(input.wasm); } catch (error) { return { issues: [`the kit binary: ${(error as Error).message} — build the kit with "cargo build --release --target wasm32-unknown-unknown"`], warnings }; }
-  const missing = KIT_MODULE_EXPORTS.filter((e) => !info.exports.includes(e));
-  if (missing.length) issues.push(`the binary does not export ${missing.join(', ')}: the crate must be a cdylib ([lib] crate-type = ["cdylib"]) that calls gripforge_kit_guest::export_kit!(…)`);
+  try { info = inspectKitWasm(input.wasm); } catch (error) { return { issues: [`the kit binary: ${(error as Error).message} — build the kit with "gripforge kit build <kit folder>"`], warnings }; }
+  const mode = kitBinaryMode(info);
+  if (!mode) return { issues: [NOT_A_KIT_BINARY], warnings };
+  if (kit.memory && kit.memory !== mode) issues.push(`kit.json says memory "${kit.memory}", the binary is the ${mode} build: this manifest is the one of another binary (gripforge kit build writes one manifest beside each build)`);
+  // The trust the game gives decides the mode; the binary must be the build of that mode (never another way of loading it).
+  if (input.trust && input.trust !== mode) {
+    issues.push(input.trust === 'common'
+      ? `the game trusts ${kit.id} with the common memory ("trust": "common") but the binary is its isolated build: declare the build for the common memory (the .common.wasm of gripforge kit build)`
+      : `the binary of ${kit.id} is built for the common memory, where it can read and corrupt the game and the other kits, and the game does not trust it with it: declare its isolated build (the .isolated.wasm of gripforge kit build), or say you trust this kit (--trust common, "trust": "common")`);
+  }
+  const missing = [...KIT_MODULE_EXPORTS, ...KIT_MODE_EXPORTS[mode]].filter((e, i, all) => all.indexOf(e) === i && !info.exports.includes(e));
+  if (missing.length) issues.push(`the binary does not export ${missing.join(', ')}: it is not a complete ${mode} kit module — build it with "gripforge kit build <kit folder>"`);
+  if (mode === 'common') {
+    const memory = info.imports.find((i) => i.module === 'env' && i.name === 'memory' && i.kind === 2);
+    if (!memory) issues.push('the binary is relocatable but does not import env.memory: not a kit module of the common memory');
+    for (const i of info.imports) {
+      if (i.module === 'env' && !(KIT_COMMON_ENV as readonly string[]).includes(i.name)) issues.push(`the binary imports env.${i.name}, which the host does not give`);
+      if (i.module.startsWith('GOT.')) issues.push(`the binary imports ${i.module}.${i.name}: a symbol left for a dynamic linker`);
+    }
+  }
+  // The structures of the contract: against the base it was built on (`structs`), and against the core it will be played with.
+  const base = kitStructsMismatch(input.structs, info.structs, 'this build base');
+  if (base) issues.push(base);
+  const coreStructs = input.modules?.structs?.structs ? { version: input.modules.structs.contract ?? '0.0', structs: input.modules.structs.structs } : null;
+  const core = kitStructsMismatch(coreStructs, info.structs, `the core ${input.modules?.core?.name ?? ''}@${input.modules?.core?.version ?? ''}`.trim());
+  if (core) issues.push(core);
+  if (!info.structs) issues.push('the binary carries no structures table (custom section gripforge.structs): it was not built on the contract (gripforge kit build)');
+  if (input.modules?.core && !input.modules.core.memory) issues.push(`the core ${input.modules.core.name}@${input.modules.core.version} of these kit modules owns its memory (an older build): a third-party kit is loaded by the core of the common memory — export the game again`);
   const lines = (kind: string) => info.contracts.filter((l) => l.startsWith(`${kind} `)).map((l) => l.slice(kind.length + 1).trim());
-  if (!info.contracts.length) issues.push('the binary has no "gripforge.calls" section: it was not built with export_kit! (or was built for another target than wasm32-unknown-unknown)');
+  if (!info.contracts.length) issues.push('the binary has no "gripforge.calls" section: it is not a kit module (gripforge kit build)');
   else for (const key of ['provides', 'consumes'] as const) {
     const inBinary = [...lines(key)].sort(), inManifest = [...list(kit[key])].sort();
     if (JSON.stringify(inBinary) !== JSON.stringify(inManifest)) {
@@ -186,7 +331,7 @@ export function checkThirdPartyKit(input: { manifest: unknown; wasm: Uint8Array;
       for (const c of lines('consumes').length ? lines('consumes') : list(kit.consumes)) {
         const [name, req] = splitKitTarget(c), have = provided.get(name);
         if (!have) issues.push(`the kit consumes ${c}, which the core ${core.name}@${core.version} does not provide (it provides ${[...provided.keys()].join(', ')})`);
-        else if (!kitVersionMatches(req, have)) issues.push(`the kit consumes ${c}, the core provides ${name}@${have}: ${parseKitVersion(req.replace(/^\D+/, ''))?.[0] !== parseKitVersion(have)?.[0] ? 'another major version — rebuild the kit against the gripforge-kit-guest of this core' : 'the core is older than the interface the kit was built against — update the core, or build the kit against the older gripforge-kit-guest'}`);
+        else if (!kitVersionMatches(req, have)) issues.push(`the kit consumes ${c}, the core provides ${name}@${have}: ${parseKitVersion(req.replace(/^\D+/, ''))?.[0] !== parseKitVersion(have)?.[0] ? 'another major version — rebuild the kit for this core (gripforge kit build)' : 'the core is older than the interface the kit was built against — update the core (export the game again), or build the kit with the kit SDK of that core'}`);
       }
     }
     const need = (spec: string, optional: boolean) => {
@@ -223,7 +368,8 @@ export const thirdPartyModuleFile = (id: string, sha256: string): string => `kit
 
 /** The line of a third-party kit in `kit-modules.json`. */
 export function thirdPartyModuleEntry(decl: ThirdPartyKitDecl) {
-  return { version: decl.version, wasm: thirdPartyModuleFile(decl.id, decl.sha256), bytes: decl.bytes, hash: decl.sha256.slice(0, 16), sha256: decl.sha256, thirdParty: true,
+  // `memory`: how the page loads it — in the common memory when the game trusts it, isolated otherwise.
+  return { version: decl.version, wasm: thirdPartyModuleFile(decl.id, decl.sha256), bytes: decl.bytes, hash: decl.sha256.slice(0, 16), sha256: decl.sha256, thirdParty: true, memory: kitTrust(decl), trust: kitTrust(decl),
     provides: list(decl.manifest.provides), consumes: list(decl.manifest.consumes), services: list(decl.manifest.services) };
 }
 
@@ -248,7 +394,7 @@ export function declareThirdPartyKit<G extends ThirdPartyGame>(game: G, decl: Th
     project: { ...game.project, installed, thirdPartyKits: [...thirdPartyKits(game.project).filter((k) => k.id !== decl.id), decl] },
     lock: { ...game.lock, order,
       kits: { ...(game.lock.kits ?? {}), [decl.id]: { ...(game.lock.kits?.[decl.id] ?? {}), version: decl.version, enabled: entry.enabled } },
-      thirdParty: { ...(game.lock.thirdParty ?? {}), [decl.id]: { version: decl.version, sha256: decl.sha256, bytes: decl.bytes } } },
+      thirdParty: { ...(game.lock.thirdParty ?? {}), [decl.id]: { version: decl.version, sha256: decl.sha256, bytes: decl.bytes, trust: kitTrust(decl) } } },
   };
 }
 
@@ -267,7 +413,7 @@ export function removeThirdPartyKit<G extends ThirdPartyGame>(game: G, id: strin
 
 /** The problems of one declaration alone. */
 export function declarationIssues(decl: unknown): string[] {
-  if (!decl || typeof decl !== 'object') return ['a third-party kit declaration must be an object { id, version, source, sha256, bytes, manifest }'];
+  if (!decl || typeof decl !== 'object') return ['a third-party kit declaration must be an object { id, version, source, sha256, bytes, trust, manifest }'];
   const d = decl as Partial<ThirdPartyKitDecl>, issues: string[] = [], who = typeof d.id === 'string' ? d.id : 'third-party kit';
   if (typeof d.id !== 'string' || !KIT_ID.test(d.id)) issues.push(`${who}: "id" must be a dotted lowercase id (got ${JSON.stringify(d.id)})`);
   if (!parseKitVersion(d.version) || String(d.version).split('.').length !== 3) issues.push(`${who}: "version" must be major.minor.patch (got ${JSON.stringify(d.version)})`);
@@ -275,9 +421,11 @@ export function declarationIssues(decl: unknown): string[] {
   else if (/^[a-z][a-z0-9+.-]*:/i.test(d.source) && !/^https?:\/\//i.test(d.source)) issues.push(`${who}: "source" ${d.source} — only a relative path or an http(s) URL`);
   if (typeof d.sha256 !== 'string' || !SHA256.test(d.sha256)) issues.push(`${who}: "sha256" must be the 64 hexadecimal digits of the module's SHA-256`);
   if (!Number.isSafeInteger(d.bytes) || (d.bytes ?? 0) <= 0) issues.push(`${who}: "bytes" must be the size of the module`);
+  if (d.trust !== undefined && !(KIT_MODES as readonly unknown[]).includes(d.trust)) issues.push(`${who}: "trust" must be "isolated" (the default: a memory of its own) or "common" (the game lets it into the common memory) — got ${JSON.stringify(d.trust)}`);
   const m = kitManifestIssues(d.manifest);
   if (m.length) issues.push(...m.map((x) => `${who}: ${x}`));
   else {
+    if (d.manifest!.memory && d.manifest!.memory !== kitTrust(d)) issues.push(`${who}: trust "${kitTrust(d)}" but its manifest is the one of the ${d.manifest!.memory} build — ${kitTrust(d) === 'common' ? 'declare the build for the common memory' : 'declare the isolated build, or say you trust this kit (--trust common)'}`);
     if (d.manifest!.id !== d.id) issues.push(`${who}: the manifest is the one of ${d.manifest!.id}`);
     if (d.manifest!.version !== d.version) issues.push(`${who}: declared at ${String(d.version)}, its manifest says ${d.manifest!.version}`);
   }
@@ -309,6 +457,7 @@ export function thirdPartyIssues(game: ThirdPartyGame, options: { modules?: KitM
     else {
       if (locked.version !== decl.version) issues.push(`${decl.id}: the lock froze version ${locked.version}, the project declares ${decl.version} — declare the kit again (gripforge kit add) so that the three agree`);
       if (locked.sha256 !== decl.sha256) issues.push(`${decl.id}: the lock froze sha256 ${locked.sha256.slice(0, 16)}…, the project declares ${decl.sha256.slice(0, 16)}… — declare the kit again (gripforge kit add) so that the three agree`);
+      if (kitTrust(locked) !== kitTrust(decl)) issues.push(`${decl.id}: the lock froze trust "${kitTrust(locked)}", the project declares "${kitTrust(decl)}" — the trust given to a kit is changed by declaring it again (gripforge kit add --trust ${kitTrust(decl)})`);
     }
     const lockedKit = game.lock.kits?.[decl.id];
     if (lockedKit && lockedKit.version !== decl.version) issues.push(`${decl.id}: lock.kits says ${lockedKit.version}, the project declares ${decl.version} — declare the kit again (gripforge kit add) so that the three agree`);
@@ -326,6 +475,7 @@ export function thirdPartyIssues(game: ThirdPartyGame, options: { modules?: KitM
         if (module.version !== decl.version) issues.push(`${decl.id}: the kit module is version ${String(module.version)}, the game declares ${decl.version} — the kit modules hold another build of the kit (gripforge kit add puts the declared one there; or export again)`);
         const fingerprint = module.sha256 ?? module.hash;
         if (fingerprint && !decl.sha256.startsWith(fingerprint)) issues.push(`${decl.id}: the kit module has sha256 ${fingerprint.slice(0, 16)}…, the game declares ${decl.sha256.slice(0, 16)}… — not the binary that was declared`);
+        if ((module.memory ?? 'own') !== kitTrust(decl)) issues.push(`${decl.id}: the kit modules load it with memory "${module.memory ?? 'own'}", the game declares trust "${kitTrust(decl)}" — the kit modules do not hold what was declared (gripforge kit add puts it there; or export again)`);
       }
     }
   }
@@ -335,11 +485,11 @@ export function thirdPartyIssues(game: ThirdPartyGame, options: { modules?: KitM
 }
 
 /** One line per declared kit, for the CLI and the MCP. */
-export function thirdPartySummary(game: ThirdPartyGame): Array<{ config: Record<string, unknown>; mounts: number; id: string; version: string; source: string; sha256: string; bytes: number; enabled: boolean; installed: boolean; locked: boolean; services: string[]; requires: string[]; optional: string[] }> {
+export function thirdPartySummary(game: ThirdPartyGame): Array<{ trust: KitMode; config: Record<string, unknown>; mounts: number; id: string; version: string; source: string; sha256: string; bytes: number; enabled: boolean; installed: boolean; locked: boolean; services: string[]; requires: string[]; optional: string[] }> {
   return thirdPartyKits(game.project).map((k) => {
     const entry = (game.project.installed ?? []).find((i) => i.id === k.id), locked = game.lock.thirdParty?.[k.id];
-    return { config: entry?.config ?? {}, mounts: (game.lock.order ?? []).indexOf(k.id) + 1, id: k.id, version: k.version, source: k.source, sha256: k.sha256, bytes: k.bytes, enabled: !!entry && entry.enabled !== false, installed: !!entry,
-      locked: !!locked && locked.sha256 === k.sha256 && locked.version === k.version, services: list(k.manifest?.services), requires: list(k.manifest?.requires), optional: list(k.manifest?.optional) };
+    return { trust: kitTrust(k), config: entry?.config ?? {}, mounts: (game.lock.order ?? []).indexOf(k.id) + 1, id: k.id, version: k.version, source: k.source, sha256: k.sha256, bytes: k.bytes, enabled: !!entry && entry.enabled !== false, installed: !!entry,
+      locked: !!locked && locked.sha256 === k.sha256 && locked.version === k.version && kitTrust(locked) === kitTrust(k), services: list(k.manifest?.services), requires: list(k.manifest?.requires), optional: list(k.manifest?.optional) };
   });
 }
 
@@ -354,7 +504,7 @@ export function kitModulesGapsFor(manifest: KitModulesIndex | null | undefined, 
   if (!manifest || typeof manifest !== 'object') return ['no manifest'];
   const gaps: string[] = [];
   if (manifest.schema !== 'gripforge.kit-modules/1') gaps.push(`manifest schema ${String(manifest.schema)}`);
-  if (!manifest.core?.wasm && !manifest.merged?.wasm) gaps.push('no core module');
+  if (!manifest.core?.wasm) gaps.push('no core module');
   const missing = kits.filter((id) => !KITS_IN_CORE.includes(id) && !manifest.kits?.[id]?.wasm);
   if (missing.length) gaps.push(`no module for ${missing.join(', ')}`);
   if (game) gaps.push(...thirdPartyIssues(game, { modules: manifest }).filter((line) => !missing.some((id) => line.startsWith(`${id}: no kit module`))));
