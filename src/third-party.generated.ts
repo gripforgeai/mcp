@@ -40,6 +40,8 @@ export const KITS_IN_CORE: readonly string[] = ['game.engine'];
 
 /** `kit.json`, written by the author of the kit. */
 export interface ThirdPartyKitManifest {
+  /** Optional project-local catalogue metadata; never executable JavaScript. */
+  catalog?: unknown;
   schema: string;
   id: string;
   version: string;
