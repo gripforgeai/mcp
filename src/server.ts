@@ -566,7 +566,7 @@ server.tool(
     'For knives/guns use gripforge_generate_weapon. Costs 10 credits. Returns job_id immediately; poll gripforge_generation_read. Closing this call does not cancel it.',
   {
     idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
-    prompt: z.string().min(3).max(600).describe('Description. "Devil May Cry like enemy" → tagged devil-may-cry, kind=enemy.'),
+    prompt: z.string().min(3).max(2000).describe('Description. "Devil May Cry like enemy" → tagged devil-may-cry, kind=enemy. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
     provider: z.enum(['tripo', 'meshy', 'gpu']).optional().describe('Default tripo (text) / meshy (image), or the server default. tripo is forced to meshy when concept_item / path / file_url is set. ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
     engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
     rig: z.boolean().optional().describe('provider gpu only: true = rig with Tripo (only when Tripo is configured on the server); omitted = automatic rig on the GPU box (GripForge biped skeleton, meta.rig = tokenrig; the character stays unrigged with a note if it fails); false = no rig (meta.rig = none).'),
@@ -644,7 +644,7 @@ server.tool(
     'Do NOT write one-off Meshy scripts.',
   {
     idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
-    prompt: z.string().min(3).max(600).describe('e.g. CS2 default CT combat knife, silver blade, black grip'),
+    prompt: z.string().min(3).max(2000).describe('e.g. CS2 default CT combat knife, silver blade, black grip. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
     name: z.string().max(160).optional(),
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
     style: z.enum(['melee', 'gun', 'shield', 'staff']).optional().describe('Grip style for attach (inferred if omitted)'),
@@ -696,7 +696,7 @@ server.tool(
   'CREATE a game-ready prop GLB (kart, crate, banana, barrier…) and save it to Library as kind=prop. Default Meshy, no T-pose, no rig. polycount default 4000. Quoted against the shared subscription, or 10 GripForge credits if it cannot cover the complete operation. Returns a durable job_id; poll gripforge_generation_read.',
   {
     idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
-    prompt: z.string().min(3).max(600).describe('e.g. compact orange open-cockpit racing kart, isolated'),
+    prompt: z.string().min(3).max(2000).describe('e.g. compact orange open-cockpit racing kart, isolated. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
     name: z.string().max(160).optional(),
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
     provider: z.enum(['meshy', 'tripo', 'gpu']).optional().describe('Default meshy (or the server default). ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
@@ -1455,7 +1455,7 @@ server.tool(
   'Three LOOK pictures (3/4, Imagine low 1K) of a named character, enemy or boss BEFORE any 3D. Pass weapon to show it on the looks; 3D later is T-pose empty hands. Pick one, then gripforge_generate_character with concept_item. 1 credit per image (default 3).',
   {
     name: z.string().min(2).max(80).describe('Creation name, stored on each concept'),
-    prompt: z.string().min(3).max(600).describe('Look, outfit, silhouette'),
+    prompt: z.string().min(3).max(2000).describe('Look, outfit, silhouette'),
     kind: z.enum(['character', 'enemy', 'boss']).optional().describe('Default character'),
     weapon: z.string().max(160).optional().describe('Shown on the looks only; empty hands if omitted'),
     n: z.number().min(1).max(4).optional().describe('Default 3'),
