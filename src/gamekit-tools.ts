@@ -36,6 +36,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_game_capabilities',
   'gripforge_game_project',
   'gripforge_game_art_direction',
+  'gripforge_game_theme_from_concept',
   'gripforge_game_asset_plan',
   'gripforge_gamekit_creatures',
   'gripforge_game_engine',
@@ -460,7 +461,7 @@ export function registerGameKitTools(
   tool(
     'gripforge_gamekit_configure',
     'Configure an installed Game Kit',
-    'Tune an installed kit: merge config values validated against the kit configSchema (read it with gripforge_gamekit_get), or patch the config as a document (patch: set a nested key, add / change / remove one element of a list without rewriting it), or toggle enabled to switch the kit off without uninstalling it. Configure installed kits freely rather than recoding what they do (game.engine: startScene, startEntry, flow.title, story flags). Switching game.engine off follows the confirmation of a removal: the first call answers 409 confirm_required with details.confirm; send it back with enabled=false after the user agreed — never on your own. Returns { kit, project } with the new project revision. Call this AFTER gripforge_gamekit_install. 0 credits.',
+    'Tune an installed kit: merge config values validated against the kit configSchema (read it with gripforge_gamekit_get), or patch the config as a document (patch: set a nested key, add / change / remove one element of a list without rewriting it), or toggle enabled to switch the kit off without uninstalling it. Configure installed kits freely rather than recoding what they do (game.engine: startScene, startEntry, flow.title, story flags). The interface look of a game is ui.theme: set preset (scifi-lowpoly, military, fantasy-medieval, cyberpunk-neon, cartoon-bright, horror-dark, minimal-clean, retro-pixel) for a complete look, and only the colours, typography, shapes or glyphs that must differ (they win over the preset); gripforge_game_theme_from_concept fills it from the art direction. Switching game.engine off follows the confirmation of a removal: the first call answers 409 confirm_required with details.confirm; send it back with enabled=false after the user agreed — never on your own. Returns { kit, project } with the new project revision. Call this AFTER gripforge_gamekit_install. 0 credits.',
     {
       project_id: projectId,
       id: kitId,
@@ -620,6 +621,21 @@ export function registerGameKitTools(
       if (args.art_direction === undefined || args.expected_revision === undefined) return Promise.resolve(fail('set needs art_direction and expected_revision from get.'));
       return api(path, { workspace_id: args.workspace_id, artDirection: args.art_direction, expected_revision: args.expected_revision }, 'PATCH', extra?.signal);
     },
+  );
+
+  tool(
+    'gripforge_game_theme_from_concept',
+    'Fill the game interface theme from a generated UI concept',
+    'Generic concept → theme pipeline for a Game Kit project: the saved art direction (gripforge_game_art_direction: look, theme, palette, notes, device) becomes ONE interface concept image (title, main menu, HUD with health, a weapon card, key prompts), a vision pass reads its design tokens (colour roles, radius, border width, button shape, padding, letter case, weight, the closest open-licence font, glyph style, closest preset) and they are written as the ui.theme config (contrast repaired). The concept is kept in the Library (kind concept, category ui). action=quote prices it: 1 credit per run (quote it and ask the user before run). Without regenerate the latest concept of the project is reused (no new image). dry_run=true writes nothing. run returns a generation job: poll it with gripforge_generation_read; its result carries config, tokens, fixes, previous_config and revision_before for a rollback (gripforge_gamekit_configure ui.theme with previous_config).',
+    {
+      project_id: projectId,
+      action: schema.enum(['quote', 'run']).describe('quote prices it and returns next; run queues it (needs expected_revision from quote).'),
+      expected_revision: schema.number().int().positive().optional().describe('run: the revision returned by quote.'),
+      regenerate: schema.boolean().optional().describe('true draws a new concept image; default reuses the latest concept of the project.'),
+      dry_run: schema.boolean().optional().describe('true: generate and read the tokens without writing the project.'),
+    },
+    { readOnly: false },
+    (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/theme-concept`, { workspace_id: args.workspace_id, action: args.action, expected_revision: args.expected_revision, regenerate: args.regenerate, dry_run: args.dry_run }, 'POST', extra?.signal),
   );
 
   tool(
