@@ -705,7 +705,7 @@ server.tool(
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
     provider: z.enum(['meshy', 'tripo', 'gpu']).optional().describe('Default meshy (or the server default). ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
     engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
-    concept_item: z.string().min(1).max(160).optional().describe('Owned concept image in this workspace; forces Meshy image-to-3D.'),
+    concept_item: z.string().min(1).max(160).optional().describe('Owned concept image in this workspace (image-to-3D): Meshy by default, or our GPU with provider gpu (Hunyuan or TRELLIS.2 from this exact image).'),
     concept_items: z.array(z.string().min(1).max(160)).min(2).max(4).optional().describe('2–4 distinct owned views of the SAME prop for Meshy multi-image-to-3D. Do not combine with concept_item. Geometry standard/2k only.'),
     meshQuality: z.object({ geometry: z.enum(['standard', '2k', '4k']), texture: z.enum(['2k', '4k', '8k']) }).optional().describe('Meshy geometry and PBR texture quality. Requested texture resolution is retained through optimization.'),
     optimize: z.boolean().optional().describe('Default true; false retains the provider mesh for close-up review.'),
