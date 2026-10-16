@@ -46,7 +46,7 @@ export function registerAssetProductionTools(register: VfxProjectRegister, optio
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       q: schema.string().max(200).describe('Visual role or style, e.g. sci-fi turret, rock, soldier.'),
-      kind: schema.enum(['character','fps-arms','enemy','weapon','equipment','prop','texture','skybox','vfx','animation','audio','kit']).optional().describe('Optional asset kind.'),
+      kind: schema.enum(['character','fps-arms','enemy','creatures','weapon','equipment','prop','texture','skybox','vfx','animation','audio','kit']).optional().describe('Optional asset kind.'),
       source: schema.enum(['workspace','community','both']).optional().describe('Defaults to both.'),
       limit: schema.number().int().min(1).max(48).optional().describe('Results per source; default 12.'),
       offset: schema.number().int().min(0).max(10000).optional().describe('Pagination offset per source; default 0.'),

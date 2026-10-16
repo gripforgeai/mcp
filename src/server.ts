@@ -423,7 +423,7 @@ async function downloadTo(url: string, dest: string): Promise<boolean> {
   return true;
 }
 
-const KIND = z.enum(['character', 'fps-arms', 'enemy', 'weapon', 'prop', 'texture', 'skybox', 'loading', 'hud', 'button', 'bind', 'vfx', 'animation', 'audio']);
+const KIND = z.enum(['character', 'fps-arms', 'enemy', 'creatures', 'weapon', 'prop', 'texture', 'skybox', 'loading', 'hud', 'button', 'bind', 'vfx', 'animation', 'audio']);
 const TEX_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 
 server.tool(
@@ -1040,14 +1040,16 @@ server.tool(
   {
     kind: KIND.optional().describe('Filter by kind'),
     q: z.string().optional().describe('Search name/filename'),
+          subtype: z.string().optional().describe('Subtype within the selected kind, e.g. quadruped under creatures.'),
     style: z.string().optional().describe('Game look id or alias (e.g. souls-like, open-world-adventure)'),
     sort: z.enum(['newest', 'rank']).optional().describe('newest (default) or rank: best fit first'),
     target: z.enum(['mobile', 'desktop']).optional().describe('Platform for the rank budgets. Defaults to mobile.'),
   },
-  async ({ kind, q, style, sort, target }) => {
+  async ({ kind, q, subtype, style, sort, target }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const qs = new URLSearchParams();
     if (kind) qs.set('kind', kind);
+    if (subtype) qs.set('subtype', subtype);
     if (q) qs.set('q', q);
     if (style) qs.set('style', style);
     if (sort === 'rank') qs.set('sort', 'rank');
@@ -1219,13 +1221,16 @@ server.tool(
     id: z.string().describe('Library id (lib_…)'),
     style: z.string().optional().describe('Game look id or alias (e.g. souls-like)'),
     tags: z.array(z.string()).optional().describe('Replace tags. Omit to keep existing and just add style.'),
+          kind: z.string().max(60).optional().describe('Reclassify the main type, for example creatures. The server validates compatibility with the file.'),
+          subtypes: z.array(z.string().max(60)).max(24).optional(),
+          also_kinds: z.array(z.string().max(60)).max(24).optional(),
   },
-  async ({ id, style, tags }) => {
+  async ({ id, style, tags, kind, subtypes, also_kinds }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/library/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify({ style, tags }),
+      body: JSON.stringify({ style, tags, kind, subtypes, alsoKinds: also_kinds }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
