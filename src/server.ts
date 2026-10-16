@@ -518,8 +518,8 @@ server.tool(
 
 server.tool(
   'gripforge_style_kit',
-  'Resolve "Devil May Cry like" / "genshin" to the locker kit already tagged with that game look (characters, enemies, weapons, props). Call this BEFORE generating. Reuse the returned ids.',
-  { prompt: z.string().min(2).max(240).describe('e.g. "devil may cry like", "un ennemi genshin"') },
+  'Resolve a game look the user names ("stylish gothic action", "anime open-world adventure") to the locker kit already tagged with that look (characters, enemies, weapons, props). Call this BEFORE generating. Reuse the returned ids.',
+  { prompt: z.string().min(2).max(240).describe('e.g. "stylish gothic action", "un ennemi d\'aventure anime"') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const qs = new URLSearchParams({ limit: '200' }) // style= does the matching; q= would also require the prompt in the NAME and empty the kit;
@@ -570,7 +570,7 @@ server.tool(
     'For knives/guns use gripforge_generate_weapon. Costs 10 credits. Returns job_id immediately; poll gripforge_generation_read. Closing this call does not cancel it.',
   {
     idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
-    prompt: z.string().min(3).max(2000).describe('Description. "Devil May Cry like enemy" → tagged devil-may-cry, kind=enemy. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
+    prompt: z.string().min(3).max(2000).describe('Description. "stylish gothic action enemy" → tagged with that look, kind=enemy. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
     provider: z.enum(['tripo', 'meshy', 'gpu']).optional().describe('Default tripo (text) / meshy (image), or the server default. tripo is forced to meshy when concept_item / path / file_url is set. ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
     engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
     rig: z.boolean().optional().describe('provider gpu only: true = rig with Tripo (only when Tripo is configured on the server); omitted = automatic rig on the GPU box (GripForge biped skeleton, meta.rig = tokenrig; the character stays unrigged with a note if it fails); false = no rig (meta.rig = none).'),
@@ -648,7 +648,7 @@ server.tool(
     'Do NOT write one-off Meshy scripts.',
   {
     idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
-    prompt: z.string().min(3).max(2000).describe('e.g. CS2 default CT combat knife, silver blade, black grip. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
+    prompt: z.string().min(3).max(2000).describe('e.g. tactical combat knife, silver blade, black grip. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
     name: z.string().max(160).optional(),
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
     style: z.enum(['melee', 'gun', 'shield', 'staff']).optional().describe('Grip style for attach (inferred if omitted)'),
@@ -756,7 +756,7 @@ server.tool(
     'Pass generate=true to forge a NEW kind=enemy mesh (10 credits, 2–8 min) — only if the locker is empty. ' +
     'Then gripforge_animate(archetype) + gripforge_hitbox. Name stays text.',
   {
-    prompt: z.string().min(2).max(240).describe('e.g. "devil may cry like phantom boss"'),
+    prompt: z.string().min(2).max(240).describe('e.g. "gothic action phantom boss"'),
     role: z.enum(['mini', 'mid', 'final']).optional().describe('mini | mid | final (inferred from the prompt)'),
     character_id: z.string().optional().describe('lib_… character/enemy/bind to bind — 0 credits'),
     generate: z.boolean().optional().describe('Forge a new enemy mesh (10 credits)'),
@@ -1038,7 +1038,7 @@ server.tool(
   {
     kind: KIND.optional().describe('Filter by kind'),
     q: z.string().optional().describe('Search name/filename'),
-    style: z.string().optional().describe('Game look (devil-may-cry, dmc, genshin)'),
+    style: z.string().optional().describe('Game look id or alias (e.g. souls-like, open-world-adventure)'),
     sort: z.enum(['newest', 'rank']).optional().describe('newest (default) or rank: best fit first'),
     target: z.enum(['mobile', 'desktop']).optional().describe('Platform for the rank budgets. Defaults to mobile.'),
   },
@@ -1215,7 +1215,7 @@ server.tool(
   'Add a game look to tags so style_kit can find the item. Does not overwrite grip style melee/gun.',
   {
     id: z.string().describe('Library id (lib_…)'),
-    style: z.string().optional().describe('Game look id or alias (devil-may-cry, dmc)'),
+    style: z.string().optional().describe('Game look id or alias (e.g. souls-like)'),
     tags: z.array(z.string()).optional().describe('Replace tags. Omit to keep existing and just add style.'),
   },
   async ({ id, style, tags }) => {
@@ -1641,7 +1641,7 @@ server.tool(
 server.tool(
   'gripforge_scene_kit',
   'Locker props for a game look plus a suggested layout (metres, Y-up). Call after style_kit. Empty slots → generate that dressing prop, tag it, retry.',
-  { prompt: z.string().min(2).max(240).describe('e.g. devil may cry like') },
+  { prompt: z.string().min(2).max(240).describe('e.g. stylish gothic action') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/scene-kit?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -1775,7 +1775,7 @@ server.tool(
 
 server.tool(
   'gripforge_map_plan',
-  'For original competitive 5v5 maps use target=tactical: fixed modular greybox, controller/bot paths, sightline/timing reports and diagnostic links. Optional art_profile applies reusable PBR harbor facades without changing gameplay collision. Human playtests required. Legacy FPS/bomb map. Interprets overhead as 3D compound (hollow rooms, corniche, A plat+pit, arches, vaulted tunnels, sidewalks). Preview https://gripforge.ai/map-plan?prompt=dust2. Pair gripforge_map_props + gripforge_map_wires. 0 credits. Dungeons: gripforge_level.',
+  'For original competitive 5v5 maps use target=tactical: fixed modular greybox, controller/bot paths, sightline/timing reports and diagnostic links. Optional art_profile applies reusable PBR harbor facades without changing gameplay collision. Human playtests required. Legacy FPS/bomb map. Interprets overhead as 3D compound (hollow rooms, corniche, A plat+pit, arches, vaulted tunnels, sidewalks). Preview https://gripforge.ai/map-plan?prompt=bomb%20defusal. Pair gripforge_map_props + gripforge_map_wires. 0 credits. Dungeons: gripforge_level.',
   { prompt: z.string().min(2).max(600).describe('e.g. Original industrial harbor, 5v5, two objective sites and contested Mid'),
     target: z.enum(['legacy', 'tactical']).optional().describe('tactical: original fixed 5v5 greybox + controller route, collision and sightline reports; not certified balance'),
     seed: z.number().int().min(0).max(4294967295).optional(),
@@ -1954,9 +1954,9 @@ server.tool(
 
 server.tool(
   'gripforge_map_refs',
-  'Official in-game stills for a map (Dust II A/B/mid/cat/tunnels). HTTPS links, Valve copyright — reference only, never Meshy image-to-3d. live=true HEAD-checks. 0 credits.',
+  'Reference stills of a known map the user names (A/B sites, mid, tunnels). HTTPS links, copyright of their owner — reference only, never Meshy image-to-3d. live=true HEAD-checks. 0 credits.',
   {
-    prompt: z.string().min(2).max(240).describe('e.g. dust2'),
+    prompt: z.string().min(2).max(240).describe('e.g. bomb defusal'),
     live: z.boolean().optional().describe('HEAD-check URLs'),
   },
   async ({ prompt, live }) => {
@@ -1972,8 +1972,8 @@ server.tool(
 
 server.tool(
   'gripforge_map_props',
-  'FPS map callout props (xbox, goose, A/B crates, mid/long doors, T palms). Matches locker. Pair with gripforge_map_plan. Preview https://gripforge.ai/map-plan?prompt=dust2. 0 credits.',
-  { prompt: z.string().min(2).max(240).describe('e.g. counter-strike dust2') },
+  'FPS map callout props (A/B crates, mid/long doors, palms, cover boxes). Matches locker. Pair with gripforge_map_plan. Preview https://gripforge.ai/map-plan?prompt=bomb%20defusal. 0 credits.',
+  { prompt: z.string().min(2).max(240).describe('e.g. tactical bomb defusal') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/map-props?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -1985,8 +1985,8 @@ server.tool(
 
 server.tool(
   'gripforge_map_wires',
-  'Sagging electrical cables for an FPS map: two anchors + sag + strands. Not a generated mesh. Pair with gripforge_map_plan. Dust2: T yard, cat (shot5a), mid, A. 0 credits.',
-  { prompt: z.string().min(2).max(240).describe('e.g. counter-strike dust2') },
+  'Sagging electrical cables for an FPS map: two anchors + sag + strands. Not a generated mesh. Pair with gripforge_map_plan. Typical spans: spawn yard, catwalk, mid, A site. 0 credits.',
+  { prompt: z.string().min(2).max(240).describe('e.g. tactical bomb defusal') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/map-wires?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -1998,9 +1998,9 @@ server.tool(
 
 server.tool(
   'gripforge_map_reconstruct',
-  'Hierarchical FPS reconstruction: classified official stills (LINK) → MapGraph → greybox (no props) → zone parts → camera match → dress (original textures + map_props + map_wires). prompt e.g. Reconstruct map: Counter-Strike 2 Dust II. stage=collect|graph|greybox|zone|dress|all. Dust II is Valve IP — benchmark only, no BSP/VPK, never Meshy a screenshot. Greybox preview https://gripforge.ai/map-plan?prompt=dust2&greybox=1 — dressed /map-plan?prompt=dust2. 0 credits.',
+  'Hierarchical FPS reconstruction: classified reference stills (LINK) → MapGraph → greybox (no props) → zone parts → camera match → dress (original textures + map_props + map_wires). prompt e.g. Reconstruct map: desert bomb-defusal map with two sites. stage=collect|graph|greybox|zone|dress|all. A known map stays its owner\'s IP — benchmark only, no BSP/VPK, never Meshy a screenshot. Greybox preview https://gripforge.ai/map-plan?prompt=bomb%20defusal&greybox=1 — dressed /map-plan?prompt=bomb%20defusal. 0 credits.',
   {
-    prompt: z.string().min(2).max(240).describe('e.g. Reconstruct map: Counter-Strike 2 Dust II'),
+    prompt: z.string().min(2).max(240).describe('e.g. Reconstruct map: desert bomb-defusal map with two sites'),
     stage: z
       .enum(['collect', 'graph', 'greybox', 'zone', 'validate', 'capture', 'dress', 'all'])
       .optional()
@@ -2026,10 +2026,10 @@ server.tool(
   'gripforge_map_export',
   'Export the dressed FPS map as ONE engine-ready GLB: merged textured meshes named <family>-col (Godot builds trimesh colliders on import), metric UVs, ground slab. Pair with a NavigationRegion3D bake. 0 credits.',
   {
-    prompt: z.string().min(2).max(240).describe('e.g. "dust2"'),
-    item: z.string().optional().describe('lib_… traced plan from gripforge_map_concept — exports the AI-drawn layout instead of dust2'),
+    prompt: z.string().min(2).max(240).describe('e.g. "bomb defusal"'),
+    item: z.string().optional().describe('lib_… traced plan from gripforge_map_concept — exports the AI-drawn layout instead of the built-in reference map'),
     extent_m: z.number().min(30).max(300).optional().describe('Rescale the traced plan to this playfield size in metres'),
-    out_dir: z.string().optional().describe('Write dust2-map.glb here'),
+    out_dir: z.string().optional().describe('Write the map .glb here'),
     save: z.boolean().optional().describe('Also store the GLB in the Library (kind prop)'),
     godot_project: z.boolean().optional().describe('Write a ready-to-run Godot 4 project around the GLB into out_dir (scenes, FPS player, navmesh bake) — then: godot --path <out_dir>'),
     lighting: z.enum(['noon', 'golden', 'dusk', 'night', 'overcast']).optional().describe('Godot mood preset (SDFGI real-time GI, no bake): noon = desert midday (default), golden = warm low sun, dusk = orange sunset, night = cool moonlight, overcast = soft grey. Tunable afterwards in scenes/main.tscn (Sun.light_energy, ambient_light_energy, sdfgi_energy — see the kit README)'),
@@ -2069,11 +2069,11 @@ server.tool(
           wrote.push(fp);
         }
         mkdirSync(join(out_dir, 'assets'), { recursive: true });
-        const gp = join(out_dir, 'assets', 'dust2.glb');
+        const gp = join(out_dir, 'assets', 'fps-map.glb');
         writeFileSync(gp, buf);
         wrote.push(gp);
       } else {
-        const gp = join(out_dir, 'dust2-map.glb');
+        const gp = join(out_dir, 'fps-map.glb');
         writeFileSync(gp, buf);
         wrote.push(gp);
       }
@@ -2084,9 +2084,9 @@ server.tool(
 
 server.tool(
   'gripforge_map_look',
-  'Reproduce a Dust II still without copying pixels: camera + volume/prop/wire ids. shot=shot21a (A), shot1a (T), shot5a (cat). LINK only, never Meshy image-to-3d. Pair map_plan. 0 credits.',
+  'Reproduce a reference still of the built-in reference map without copying pixels: camera + volume/prop/wire ids. shot=shot21a (A site), shot1a (spawn), shot5a (catwalk). LINK only, never Meshy image-to-3d. Pair map_plan. 0 credits.',
   {
-    prompt: z.string().min(2).max(240).describe('e.g. dust2'),
+    prompt: z.string().min(2).max(240).describe('e.g. bomb defusal'),
     shot: z.string().min(2).max(80).optional().describe('shot21a | a-site | shot1a | catwalk'),
   },
   async ({ prompt, shot }) => {
@@ -2132,7 +2132,7 @@ server.tool(
 server.tool(
   'gripforge_viewmodel_kit',
   'CS-style FPS viewmodel: arms + gun under Camera3D/Hold. Write viewmodel.json + gf_viewmodel.gd. 0 credits.',
-  { prompt: z.string().min(2).max(240).describe('e.g. fps or counter-strike dust2') },
+  { prompt: z.string().min(2).max(240).describe('e.g. fps or tactical bomb defusal') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/viewmodel-kit?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -2282,7 +2282,7 @@ server.tool(
 server.tool(
   'gripforge_menu_kit',
   'Front-end for a multiplayer FPS: main menu (host/join/quit), lobby listing connected peers where only the host starts, and an in-game HUD (health, round timer, score, weapon, kill feed) fed by replicated state. Pairs with gripforge_net_kit. 0 credits.',
-  { prompt: z.string().min(2).max(240).describe('e.g. counter-strike, minimal') },
+  { prompt: z.string().min(2).max(240).describe('e.g. tactical, minimal') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/menu-kit?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -2431,9 +2431,9 @@ server.tool(
 
 server.tool(
   'gripforge_gunfx_kit',
-  'Gun feedback for the Godot FPS: muzzle flash, tracer, impact sparks + bullet-hole decal, blood spray (+ wall splat). One procedural autoload GfGunfx (no textures) fired by the net kit through a shot_fx RPC after the server raycast, misses included. Presets counter-strike / arcade / subtle. 0 credits.',
+  'Gun feedback for the Godot FPS: muzzle flash, tracer, impact sparks + bullet-hole decal, blood spray (+ wall splat). One procedural autoload GfGunfx (no textures) fired by the net kit through a shot_fx RPC after the server raycast, misses included. Presets competitive (default) / arcade / subtle. 0 credits.',
   {
-    prompt: z.string().min(2).max(240).describe('e.g. counter-strike, arcade, subtle tactical'),
+    prompt: z.string().min(2).max(240).describe('e.g. competitive, arcade, subtle'),
     out_dir: z.string().optional().describe('Godot project root: writes scripts/gf_gunfx.gd, gripforge/gunfx.json and the CC0 sprites into gripforge/gunfx/ (+ LICENSES.txt)'),
   },
   async ({ prompt, out_dir }) => {
@@ -2468,7 +2468,7 @@ server.tool(
 server.tool(
   'gripforge_match_kit',
   'Listen-server match contract: party size, teams, maps, ranked flag, join-by-IP. Write match.json + autoload GfMatch on top of GfNet. GripForge does not host a queue. 0 credits.',
-  { prompt: z.string().min(2).max(240).describe('e.g. counter-strike, deathmatch, ranked 5v5') },
+  { prompt: z.string().min(2).max(240).describe('e.g. tactical 5v5, deathmatch, ranked 5v5') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/match-kit?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -2481,7 +2481,7 @@ server.tool(
 server.tool(
   'gripforge_net_kit',
   'Godot 4 multiplayer (ENet): GfNet autoload host/join/spawn with server-side hit validation, gf_round.gd for the round + bomb, MultiplayerSpawner/Synchronizer wiring. 0 credits.',
-  { prompt: z.string().min(2).max(240).describe('e.g. counter-strike, deathmatch, fps') },
+  { prompt: z.string().min(2).max(240).describe('e.g. tactical 5v5, deathmatch, fps') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/net-kit?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -2495,7 +2495,7 @@ server.tool(
   'gripforge_input_kit',
   'InputMap presets: fps (WASD + arrows on move_*) or kart (accelerate/brake/steer + standard gamepad RT/LT/stick, same indices as the web Gamepad API). Write gripforge/input.json, autoload GfInput. Optional third_person=true adds portable character-facing JavaScript and a Three.js adapter; orientation only, not a physics controller. 0 credits.',
   {
-    prompt: z.string().min(2).max(240).describe('e.g. fps or counter-strike dust2'),
+    prompt: z.string().min(2).max(240).describe('e.g. fps or tactical bomb defusal'),
     third_person: z.boolean().optional().describe('Include character-facing JavaScript and Three.js usage (default false; existing input map unchanged).'),
   },
   async ({ prompt, third_person }) => {
@@ -2512,7 +2512,7 @@ server.tool(
 server.tool(
   'gripforge_light_kit',
   'Moon / sun / candle lights + fog + Three.js snippet for a game look. 0 credits. Pair with scene_kit.',
-  { prompt: z.string().min(2).max(240).describe('e.g. devil may cry like') },
+  { prompt: z.string().min(2).max(240).describe('e.g. stylish gothic action') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/light-kit?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -2524,8 +2524,8 @@ server.tool(
 
 server.tool(
   'gripforge_font',
-  'Google-font CSS + exact HUD copy (DMC: Cinzel D–SSS, kart: Teko, CS: Barlow Condensed). Put letters in HTML — do not rasterize. 0 credits.',
-  { prompt: z.string().min(2).max(240).describe('e.g. devil may cry like') },
+  'Google-font CSS + exact HUD copy (stylish action: Cinzel D–SSS, kart: Teko, tactical FPS: Barlow Condensed). Put letters in HTML — do not rasterize. 0 credits.',
+  { prompt: z.string().min(2).max(240).describe('e.g. stylish gothic action') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/font-kit?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
@@ -2540,7 +2540,7 @@ server.tool(
   'Loading overlay for Three/Godot/Unity/Unreal. project_id uses persistent quoted generation: action quote → accept → get → apply, with creation_id and quote_token. Title is text. Overlay 0 credits. Pass character_id to generate a 16:9 cinematic still of that Library character (1 credit, no letters in the image).',
   {
     project_id:z.string().optional(), action:z.enum(['quote','accept','get','apply']).optional(), creation_id:z.string().optional(), quote_token:z.string().optional(),
-    prompt: z.string().min(2).max(2000).describe('e.g. devil may cry like'),
+    prompt: z.string().min(2).max(2000).describe('e.g. stylish gothic action'),
     character_id: z.string().optional().describe('lib_… character/enemy/bind — generate background still'),
   },
   async (args) => {
@@ -2566,7 +2566,7 @@ server.tool(
 server.tool(
   'gripforge_navmesh',
   'Walkable XZ AABB + pillar holes for a scene_kit room. JSON clamp, not a baked navmesh. 0 credits.',
-  { prompt: z.string().min(2).max(240).describe('e.g. devil may cry like') },
+  { prompt: z.string().min(2).max(240).describe('e.g. stylish gothic action') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/navmesh?${new URLSearchParams({ prompt })}`, { headers: apiHeaders() });
