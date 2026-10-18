@@ -4,7 +4,7 @@ export const VOICE_PROFILE_TOOL_NAMES = ['gripforge_voice_profile'] as const;
 export function registerVoiceProfileTools(register: VfxProjectRegister, options: { apiUrl: string; getApiKey: () => string | null | undefined }, schema: typeof z = z) {
   const shape = {
     action: schema.enum(['schema', 'list', 'get', 'characters', 'assign']).default('list'),
-    q: schema.string().max(100).optional(), language: schema.string().max(20).optional(), scope: schema.enum(['all', 'mine', 'community']).optional(),
+    q: schema.string().max(100).optional(), language: schema.string().max(20).describe('list defaults to English (en); use all for every language. assign requires an explicit tested language.').optional(), scope: schema.enum(['all', 'mine', 'community']).optional(),
     voice_id: schema.string().regex(/^lib_[A-Za-z0-9_-]{8,64}$/).optional(),
     project_id: schema.string().regex(/^gkp_[A-Za-z0-9_-]+$/).optional(),
     speaker: schema.string().trim().min(1).max(100).optional(), instructions: schema.string().max(500).optional(),
@@ -24,6 +24,7 @@ export function registerVoiceProfileTools(register: VfxProjectRegister, options:
     const key = options.getApiKey();
     if (['characters', 'assign'].includes(action) && !key) return { isError: true, content: [{ type: 'text', text: 'GripForge API key required.' }] };
     const url = new URL(options.apiUrl.replace(/\/$/, '') + '/api/v1/voice-profiles');
+    if (action === 'list') url.searchParams.set('language', body.language?.trim() || 'en');
     if (action !== 'assign') { url.searchParams.set('action', action); for (const [name, value] of Object.entries(body)) if (value !== undefined) url.searchParams.set(name, String(value)); }
     try {
       const response = await fetch(url, { method: action === 'assign' ? 'POST' : 'GET', headers: { 'content-type': 'application/json', 'x-gripforge-client': 'mcp', ...(key ? { 'x-api-key': key } : {}), ...(workspace_id ? { 'x-workspace-id': workspace_id } : {}) }, ...(action === 'assign' ? { body: JSON.stringify({ action, ...body }) } : {}), signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(extra?.signal ? [extra.signal] : [])]) });
