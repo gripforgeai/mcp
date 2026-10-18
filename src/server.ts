@@ -566,14 +566,14 @@ server.tool(
 server.tool(
   'gripforge_generate_character',
   'CREATE a Mixamo T-pose auto-rigged character or enemy and save it to Library. ' +
-    'To sculpt from a picture (image-to-3D, Meshy): pass concept_item (lib_… from gripforge_concept_correct / character_concepts), or path / file_url of a T-pose or concept PNG. ' +
+    'GPU generation by default. To sculpt from a picture (image-to-3D): pass concept_item (lib_… from gripforge_concept_correct / character_concepts), or path / file_url of a T-pose or concept PNG. ' +
     'Without an image, this is text-to-3D only. ' +
     'If the look may already be in the locker, call gripforge_style_kit FIRST. ' +
     'For knives/guns use gripforge_generate_weapon. Costs 10 credits. Returns job_id immediately; poll gripforge_generation_read. Closing this call does not cancel it.',
   {
     idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
     prompt: z.string().min(3).max(2000).describe('Description. "stylish gothic action enemy" → tagged with that look, kind=enemy. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
-    provider: z.enum(['tripo', 'meshy', 'gpu']).optional().describe('Default tripo (text) / meshy (image), or the server default. tripo is forced to meshy when concept_item / path / file_url is set. ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).'),
+    provider: z.enum(['tripo', 'meshy', 'gpu']).optional().describe('Default gpu, with or without an image. An explicit provider overrides this choice; tripo with concept_item / path / file_url uses meshy. ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy generation spend.'),
     engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
     rig: z.boolean().optional().describe('provider gpu only: true = rig with Tripo (only when Tripo is configured on the server); omitted = automatic rig on the GPU box (GripForge biped skeleton, meta.rig = tokenrig; the character stays unrigged with a note if it fails); false = no rig (meta.rig = none).'),
     name: z.string().max(160).optional().describe('Library item name (default: the prompt)'),
@@ -585,7 +585,7 @@ server.tool(
     file_url: z.string().optional().describe('https URL of a concept or T-pose image. Image-to-3D.'),
     out_dir: z.string().optional().describe('After the job completes, gripforge_library_pull into this folder.'),
   },
-  async ({ idempotency_key, prompt, provider, engine, rig, name, kind, polycount, underwear, concept_item, path, file_url, out_dir }) => {
+  async ({ idempotency_key, prompt, provider = 'gpu', engine, rig, name, kind, polycount, underwear, concept_item, path, file_url, out_dir }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     let image_base64: string | undefined;
     if (path) {
@@ -610,8 +610,7 @@ server.tool(
       body: JSON.stringify({
         idempotency_key,
         prompt,
-        // gpu reste gpu ; une image force meshy à la place de tripo ; sans fournisseur, le défaut du serveur.
-        provider: provider === 'gpu' ? 'gpu' : (image_base64 || concept_item) && provider ? 'meshy' : provider,
+        provider: provider === 'gpu' ? 'gpu' : image_base64 || concept_item ? 'meshy' : provider,
         ...(provider === 'gpu' ? { engine, rig } : {}),
         name,
         kind,
