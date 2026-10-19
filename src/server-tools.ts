@@ -146,11 +146,11 @@ export function registerServerTools(
   tool(
     'gripforge_server_create',
     'Create a game server',
-    'Create a dedicated server record. Implemented: Unity+FishNet (Docker demo) and Godot+ENet (real Godot Linux headless in Docker). Unreal returns unsupported. Does not start the process until deploy.',
+    'Create a dedicated server record. Godot supports ENet and gfnet; gfnet requires a game server Docker image that boots its simulation and validation hooks. Does not start the process until deploy.',
     {
       name: schema.string().min(1).max(80),
       engine: schema.enum(['unity', 'unreal', 'godot', 'custom']).optional(),
-      networking: schema.enum(['fishnet', 'ngo', 'mirror', 'photon', 'enet', 'custom', 'unknown']).optional(),
+      networking: schema.enum(['fishnet', 'ngo', 'mirror', 'photon', 'enet', 'gfnet', 'custom', 'unknown']).optional(),
       environment: schema.enum(['production', 'staging', 'development']).optional(),
       region: schema.string().max(40).optional(),
       maxPlayers: schema.number().int().min(1).max(200).optional(),
@@ -158,6 +158,9 @@ export function registerServerTools(
       sourceKind: schema.enum(['project', 'git', 'upload', 'docker']).optional(),
       image: schema.string().max(200).optional(),
       hints: schema.string().max(2000).optional(),
+      launchTemplate: schema.string().max(2000).optional(),
+      command: schema.array(schema.string().max(4096)).max(128).optional(),
+      privateNetwork: schema.boolean().optional().describe('Bind game ports to host loopback for a WSS proxy. Default true for gfnet.'),
       demo: schema.boolean().optional(),
     },
     { readOnly: false },
