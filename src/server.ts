@@ -21,6 +21,7 @@ import { registerJoystickTools } from './joystick-tools.js';
 import { registerAbilityTools } from './ability-tools.js';
 import { registerUiScreenTools } from './ui-screen-tools.js';
 import { gameReadyLines, registerAssetProductionTools } from './asset-production-tools.js';
+import { registerAdminAssetTools } from './admin-asset-tools.js';
 import { registerCreatureRigTools } from './creature-rig-tools.js';
 import { registerCreatureGenerationTools } from './creature-generation-tools.js';
 import { registerFacialRigTools } from './facial-rig-tools.js';
@@ -75,6 +76,7 @@ registerMotionTools((server as unknown as { registerTool: VfxProjectRegister }).
 registerHeroAbilityTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGameCreationTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerAssetProductionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerAdminAssetTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 
 const err = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
 
