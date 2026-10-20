@@ -177,6 +177,86 @@ const toml = (v: string | number | boolean) => (typeof v === 'string' ? JSON.str
  * command that installs it), the compiler's errors (shown as they come), or the binary that does not fit (which
  * check, expected / found).
  */
+// ---- the contracts a kit really has (as tools/kit-modules/contracts.mjs does for the kits of GripForge) ----------
+
+/** An interface of the core: its version, and the minor each function (by number) and each direct link came in. */
+export interface KitInterface { name: string; version: string; major: number; minor: number; fns: Map<number, number>; directs: Map<string, number> }
+
+/** The interfaces of the core from the `.gfi` files of the kit SDK (`native/gripforge-kitcall/interfaces`). */
+export function readKitInterfaces(dir: string): Record<string, KitInterface> {
+  const out: Record<string, KitInterface> = {};
+  for (const file of readdirSync(dir).filter((n) => n.endsWith('.gfi')).sort()) {
+    let iface: KitInterface | null = null;
+    for (const raw of readFileSync(join(dir, file), 'utf8').split('\n')) {
+      const line = raw.replace(/\/\/.*$/, '').trim();
+      const head = /^interface\s+([^@\s]+)@(\d+)\.(\d+)\.(\d+)$/.exec(line);
+      if (head) { iface = out[head[1]!] = { name: head[1]!, version: `${head[2]}.${head[3]}.${head[4]}`, major: Number(head[2]), minor: Number(head[3]), fns: new Map(), directs: new Map() }; continue; }
+      if (!iface || !line) continue;
+      const since = Number(/\bsince\s+\d+\.(\d+)\s*$/.exec(line)?.[1] ?? 0);
+      const fn = /^fn\s+(0x[0-9a-fA-F]+|\d+)\s+/.exec(line), direct = /^direct\s+([a-z_][a-z0-9_]*)\s*\(/.exec(line);
+      if (fn) iface.fns.set(Number(fn[1]), since);
+      else if (direct) iface.directs.set(direct[1]!, since);
+    }
+  }
+  return out;
+}
+
+/** The prefix of a marker the façade leaves where it names a core function (gripforge-kit-guest src/uses.rs). */
+const USES_MAGIC = [0x67, 0x66, 0x2e, 0x75, 0x73, 0x65, 0x73, 0x3a]; // "gf.uses:"
+const CALLS_SECTION = 'gripforge.calls';
+
+function wasmSectionsOf(u8: Uint8Array): Array<{ id: number; at: number; start: number; end: number; name?: string }> {
+  const out: Array<{ id: number; at: number; start: number; end: number; name?: string }> = [];
+  let i = 8;
+  const leb = (): number => { let v = 0, shift = 0, b: number; do { b = u8[i++]!; v += (b & 127) * 2 ** shift; shift += 7; } while (b & 128); return v; };
+  while (i < u8.length) {
+    const at = i, id = u8[i++]!, size = leb(), start = i, end = start + size;
+    const s: { id: number; at: number; start: number; end: number; name?: string } = { id, at, start, end };
+    if (id === 0) { const n = leb(); s.name = Buffer.from(u8.subarray(i, i + n)).toString('utf8'); }
+    out.push(s);
+    i = end;
+  }
+  return out;
+}
+
+/**
+ * What a kit binary consumes of the core: each interface it calls (the markers of its data, its `gf:kithost.*`
+ * links) at the smallest minor that has every function it uses. A kit that never touches the physics does not
+ * consume it. Throws on a call no interface declares.
+ */
+export function kitConsumes(bytes: Uint8Array, ifaces: Record<string, KitInterface>, imports: Array<{ module: string; name: string }>, name = 'the kit'): string[] {
+  const need = new Map<string, number>(), want = (i: KitInterface, minor: number) => need.set(i.name, Math.max(need.get(i.name) ?? 0, minor));
+  for (const s of wasmSectionsOf(bytes).filter((x) => x.id === 11)) {
+    for (let i = s.start; i + 12 <= s.end; i++) {
+      if (bytes[i] !== USES_MAGIC[0] || !USES_MAGIC.every((b, k) => bytes[i + k] === b)) continue;
+      const n = (bytes[i + 8]! | (bytes[i + 9]! << 8) | (bytes[i + 10]! << 16) | (bytes[i + 11]! << 24)) >>> 0;
+      const iface = Object.values(ifaces).find((x) => x.fns.has(n));
+      if (!iface || iface.name === 'kithost.kit') throw Error(`${name}: it calls core function ${n} (0x${n.toString(16)}), which no interface of this kit SDK provides`);
+      want(iface, iface.fns.get(n)!);
+    }
+  }
+  for (const imp of imports) {
+    const m = /^gf:(kithost\.[a-z_]+)@\^?(\d+)(?:\.(\d+))?/.exec(imp.module);
+    if (!m) continue;
+    const iface = ifaces[m[1]!], since = iface?.directs.get(imp.name);
+    if (!iface || since === undefined || Number(m[2]) !== iface.major) throw Error(`${name}: it links ${imp.module}/${imp.name}, which no interface of this kit SDK declares`);
+    want(iface, Math.max(since, Number(m[3] ?? 0)));
+  }
+  return [...need].sort(([a], [b]) => a.localeCompare(b)).map(([n, minor]) => `${n}@^${ifaces[n]!.major}.${minor}`);
+}
+
+/** The binary with its `gripforge.calls` sections replaced by one holding `lines` (at the end). */
+export function withKitContracts(bytes: Uint8Array, lines: string[]): Buffer {
+  const keep: Uint8Array[] = [];
+  let from = 8;
+  for (const s of wasmSectionsOf(bytes)) if (s.id === 0 && s.name === CALLS_SECTION) { keep.push(bytes.subarray(from, s.at)); from = s.end; }
+  keep.push(bytes.subarray(from));
+  const leb = (v: number): number[] => { const o: number[] = []; do { let b = v & 127; v >>>= 7; if (v) b |= 128; o.push(b); } while (v); return o; };
+  const n = Buffer.from(CALLS_SECTION), t = Buffer.from(lines.map((l) => `${l}\n`).join(''));
+  const body = Buffer.concat([Buffer.from(leb(n.length)), n, t]);
+  return Buffer.concat([Buffer.from(bytes.subarray(0, 8)), ...keep.map((k) => Buffer.from(k)), Buffer.from([0, ...leb(body.length)]), body]);
+}
+
 export function buildKit(options: BuildKitOptions): BuildKitReport {
   const cwd = options.cwd ?? process.cwd(), log = options.log ?? ((line: string) => { if (!options.quiet) console.error(line); });
   const src = readKitSource(isAbsolute(options.kit) ? options.kit : resolve(cwd, options.kit));
@@ -191,6 +271,8 @@ export function buildKit(options: BuildKitOptions): BuildKitReport {
   const out = resolve(cwd, options.out ?? join(src.dir, 'build')), work = resolve(cwd, options.targetDir ?? join(src.dir, 'target/gripforge-kit'));
   mkdirSync(out, { recursive: true });
   const extra = Object.keys(src.crates).length > 0, warnings: string[] = [], built: BuiltKit[] = [];
+  const interfacesDir = join(sdk.root, 'native/gripforge-kitcall/interfaces');
+  const ifaces = existsSync(interfacesDir) ? readKitInterfaces(interfacesDir) : null;
   const write = (path: string, text: string) => { if (!existsSync(path) || readFileSync(path, 'utf8') !== text) writeFileSync(path, text); }; // keep cargo's fingerprints
   // Paths of this machine out of the binary (panic locations): the same source gives the same bytes anywhere.
   let sysroot = '', commit = '';
@@ -228,15 +310,25 @@ export function buildKit(options: BuildKitOptions): BuildKitReport {
     if (run.status !== 0) throw Error(`${id}@${version} (${mode}): the build failed (cargo exit ${String(run.status)})${options.quiet && run.stderr ? `\n${String(run.stderr).trim().split('\n').slice(-40).join('\n')}` : ' — the compiler\'s errors are above'}${extra ? '' : '\n(the crates are locked to the build base: a crate the kit needs goes in "crates" of kit.json)'}`);
     const file = join(target, socle.rust.targets[0]!, 'release', artifact);
     if (!existsSync(file)) throw Error(`${id}@${version} (${mode}): cargo built nothing at ${file}`);
-    const bytes = readFileSync(file);
+    let bytes: Buffer = readFileSync(file);
+    // The real contracts: what the binary provides as the façade wrote it, and the core interfaces it really calls
+    // (an SDK without the interfaces keeps the façade's list as it is).
+    let info = inspectKitWasm(bytes);
+    if (ifaces) {
+      const consumes = kitConsumes(bytes, ifaces, info.imports, `${id}@${version} (${mode})`);
+      bytes = withKitContracts(bytes, [...info.contracts.filter((l) => l.startsWith('provides ')), ...consumes.map((c) => `consumes ${c}`)]);
+      info = inspectKitWasm(bytes);
+    }
 
     // The binary against the base: its mode, its structures, what it links.
-    const info = inspectKitWasm(bytes), found = kitBinaryMode(info), problems: string[] = [];
+    const found = kitBinaryMode(info), problems: string[] = [];
     if (found !== mode) problems.push(`expected a ${mode} kit module, found ${found ?? 'a module that is neither relocatable nor isolated'}`);
     const structs = kitStructsMismatch(socle.structs, info.structs, 'the build base');
     if (structs) problems.push(structs);
     const lines = (kind: string) => info.contracts.filter((l) => l.startsWith(`${kind} `)).map((l) => l.slice(kind.length + 1).trim());
-    const wanted = [...m.contracts].sort(), got = [...info.contracts].sort();
+    // Sealed: what it provides is the base's; what it consumes was just read from it.
+    const ofBase = (list: string[]) => (ifaces ? list.filter((l) => l.startsWith('provides ')) : list);
+    const wanted = ofBase([...m.contracts]).sort(), got = ofBase([...info.contracts]).sort();
     if (JSON.stringify(wanted) !== JSON.stringify(got)) problems.push(`contracts: expected [${wanted.join('; ')}], found [${got.join('; ')}]`);
     if (mode === 'isolated') {
       for (const i of info.imports) {
