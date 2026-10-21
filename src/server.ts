@@ -17,6 +17,7 @@ import { registerVfxProjectTools, type VfxProjectRegister } from './vfx-project-
 import { registerSceneTools } from './scene-tools.js';
 import { registerGamePublicationTools } from './game-publication-tools.js';
 import { registerServerTools } from './server-tools.js';
+import { registerCentralTools } from './central-tools.js';
 import { registerGameKitTools } from './gamekit-tools.js';
 import { registerJoystickTools } from './joystick-tools.js';
 import { registerAbilityTools } from './ability-tools.js';
@@ -43,10 +44,11 @@ import { registerMapUnrealImportLocalTools } from './map-unreal-import-local.js'
 import { registerMapUnrealExportLocalTools } from './map-unreal-export-local.js';
 import { registerReverseTools } from './game-import-reverse.js';
 import { registerGameImportTools } from './game-import-tools.js';
+import { packageVersion, startUpdateCheck } from './update-check.js';
 
 const API_URL = process.env.GRIPFORGE_API_URL ?? 'https://gripforge.ai';
 const API_KEY = process.env.GRIPFORGE_API_KEY;
-const MCP_SELF = '0.1.9';
+const MCP_SELF = packageVersion();
 
 const SUPPORTED = ['.glb', '.gltf', '.fbx', '.obj'];
 
@@ -62,6 +64,7 @@ registerThirdPartyKitTools((server as unknown as { registerTool: VfxProjectRegis
 registerMapUnrealImportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerMapUnrealExportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerReverseTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
+registerCentralTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerGameImportTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerJoystickTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerAbilityTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
@@ -373,7 +376,7 @@ server.tool(
         if (outdated) {
           mcp_upgrade =
             `GripForge MCP npm ${MCP_SELF} is outdated (latest ${latest}). ` +
-            `Upgrade: npx -y @gripforgeai/mcp@${latest} then restart your MCP client. ` +
+            `Upgrade: register the MCP as npx -y @gripforgeai/mcp@latest, then restart your MCP client. ` +
             `Or hosted: ${hosted ?? 'https://gripforge.ai/mcp'}`;
         }
       }
@@ -2865,5 +2868,6 @@ server.tool(
   },
 );
 
-const transport = new StdioServerTransport();
+// The update check runs in the background: offline or slow registries never delay the start.
+const transport = startUpdateCheck(new StdioServerTransport(), { current: MCP_SELF });
 await server.connect(transport);
