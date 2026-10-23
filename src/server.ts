@@ -26,6 +26,7 @@ import { gameReadyLines, registerAssetProductionTools } from './asset-production
 import { registerAdminAssetTools } from './admin-asset-tools.js';
 import { registerCreatureRigTools } from './creature-rig-tools.js';
 import { registerCreatureGenerationTools } from './creature-generation-tools.js';
+import { registerComputeTools } from './compute-tools.js';
 import { registerFacialRigTools } from './facial-rig-tools.js';
 import { registerGameAudioTools } from './game-audio-tools.js';
 import { registerVoiceProfileTools } from './voice-profile-tools.js';
@@ -83,6 +84,7 @@ registerMotionTools((server as unknown as { registerTool: VfxProjectRegister }).
 registerHeroAbilityTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGameCreationTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerAssetProductionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerComputeTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY, local: true, readFile: path => readFile(resolve(path)), writeFile: async (path, bytes) => { const dest = resolve(path); await mkdir(dirname(dest), { recursive: true }); await writeFile(dest, bytes); return dest; } });
 registerAdminAssetTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 
 const err = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
