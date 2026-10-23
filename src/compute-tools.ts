@@ -52,7 +52,7 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
 
   register(COMPUTE_TOOL_NAMES[1], {
     title: 'Compute · generate a 3D asset',
-    description: 'Make a textured 3D prop/furniture asset with GripForge Compute from ONE image (image_base64 or a local image_path) or a text description (source=text). Two steps: stage=quote (free) returns quote.token and the price (credits or subscription); show it to the user, then stage=generate with that quote_token and confirm=true launches one durable job (debited once, after success). Poll gripforge_compute_job. Result: two GLBs (scene, detail) in the private library, each with edit_url (studio edit page) and file_url. Characters and vehicles are not supported yet.',
+    description: 'ON DEMAND ONLY: use when the user asks for GripForge Compute; the default 3D generator stays gripforge_generate_prop without provider. Make a textured 3D prop/furniture asset with GripForge Compute from ONE image (image_base64 or a local image_path) or a text description (source=text). Two steps: stage=quote (free) returns quote.token and the price (credits or subscription); show it to the user, then stage=generate with that quote_token and confirm=true launches one durable job (debited once, after success). Poll gripforge_compute_job. Result: two GLBs (scene, detail) in the private library, each with edit_url (studio edit page) and file_url. Characters and vehicles are not supported yet.',
     inputSchema: {
       stage: schema.enum(['quote', 'generate']).describe('quote first (free), then generate'),
       source: schema.enum(['image', 'text']).optional().describe('Default image'),

@@ -34,7 +34,7 @@ export function registerAssetProductionTools(register: VfxProjectRegister, optio
     title: 'Estimate generation usage before spending',
     description: 'Free quote for a model, concept, texture, rig or animation. Reports the account funding mode, available balance and estimated operation cost. A subscription combines AI and paid asset generation in one monthly limit without also charging generation credits. Quote every missing role, propose the plan, and obtain a generation budget before submitting paid jobs. Estimates cover one operation, not the full concept/rig/review pipeline.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    inputSchema: { kind: schema.enum(['model','concept','texture','rig','animation']), provider: schema.enum(['meshy','tripo','xai','openai']).optional(), count: schema.number().int().min(1).max(20).optional(), workspace_id: workspace },
+    inputSchema: { kind: schema.enum(['model','concept','texture','rig','animation']), provider: schema.enum(['meshy','tripo','compute','xai','openai']).optional(), count: schema.number().int().min(1).max(20).optional(), workspace_id: workspace },
   }, wrap(args => {
     const params = new URLSearchParams({ kind: String(args.kind), count: String(args.count ?? 1) });
     if (args.provider) params.set('provider', String(args.provider));
