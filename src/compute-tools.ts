@@ -8,7 +8,6 @@ import type { VfxProjectRegister } from './vfx-project-tools.js';
  * Each asset comes back with its direct edit page (`edit_url`) that the client can open.
  */
 export const COMPUTE_TOOL_NAMES = ['gripforge_compute_status', 'gripforge_compute_generate', 'gripforge_compute_job', 'gripforge_compute_assets', 'gripforge_compute_variant', 'gripforge_compute_download', 'gripforge_compute_validate'] as const;
-const BUDGETS = ['petit_objet', 'en_main', 'outil_detaille', 'mobilier_simple', 'gros_mobilier'] as const;
 type Options = { apiUrl: string; getApiKey: () => string | null | undefined; local?: boolean; readFile?: (path: string) => Promise<Buffer>; writeFile?: (path: string, bytes: Buffer) => Promise<string> };
 type Result = { isError?: boolean; structuredContent?: Record<string, unknown>; content: { type: 'text'; text: string }[] };
 
@@ -78,7 +77,8 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
       image_base64: schema.string().max(12_000_000).optional().describe('source=image: PNG/JPEG/WebP, raw base64 or data URI, up to 8 MB'),
       ...(options.local ? { image_path: schema.string().max(1000).optional().describe('source=image: local PNG/JPEG/WebP file (instead of image_base64)') } : {}),
       items: schema.array(itemShape).min(1).max(5).optional().describe('Several assets at once: [{name, prompt} or {name, image_base64' + (options.local ? '|image_path' : '') + '}]'),
-      object_type: schema.enum(BUDGETS).optional().describe('Triangle budget class. Default mobilier_simple'),
+      type: schema.enum(['objet', 'meuble', 'batiment', 'vegetation', 'vehicule', 'personnage', 'mob', 'creature']).optional().describe('Asset type (gripforge_compute_status lists those the router makes now). personnage / mob / creature: the mesh only; rig and animate it afterwards in the Character studio. Weapons are refused'),
+      object_type: schema.string().regex(/^[a-z_]{2,40}$/).optional().describe('Size (budget) of the type, e.g. petit_objet, mobilier_simple; default: the type\'s default'),
       quality: schema.enum(['standard', 'detail']).optional().describe('Texture quality. Default standard'),
       triangles: schema.number().int().min(500).max(200000).optional().describe('Image assets only: exact triangle count of the « near » GLB (the « scene » one gets half). Default: from object_type. For a finished asset (also from text), use gripforge_compute_variant kind=budget'),
       options: schema.array(schema.enum(['photo', 'matieres', 'relief'])).max(3).optional().describe('Image assets: photo (keep visible details), matieres (refine materials), relief (surface detail). Default all three'),
@@ -103,7 +103,7 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
       if (!text) { const r = await imageOf(item); if (typeof r !== 'string') return r; image = r; }
       else if (typeof item.prompt !== 'string') return fail(`${String(item.name)}: a text asset needs prompt.`);
       const body = {
-        action: args.stage, source: text ? 'text' : 'image', name: item.name, budget: args.object_type ?? 'mobilier_simple', quality: args.quality ?? 'standard',
+        action: args.stage, source: text ? 'text' : 'image', name: item.name, ...(typeof args.type === 'string' ? { type: args.type } : {}), budget: args.object_type ?? (typeof args.type === 'string' && !['objet', 'meuble'].includes(args.type) ? 'defaut' : 'mobilier_simple'), quality: args.quality ?? 'standard',
         options: text ? [] : args.options ?? ['photo', 'matieres', 'relief'], ...(text ? { prompt: item.prompt, ...(args.auto_pick === true ? { auto_pick: true } : {}) } : { image, ...(typeof args.triangles === 'number' ? { triangles: args.triangles } : {}) }),
         ...(args.stage === 'generate' ? { accepted_quote: tokens[index], idempotency_key: list.length > 1 ? `${batchKey.slice(0, 150)}:${index}` : batchKey } : {}),
       };
@@ -143,7 +143,7 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
 
   register(COMPUTE_TOOL_NAMES[3], {
     title: 'Compute · list assets',
-    description: 'List recent GripForge Compute assets of the workspace (manufactures and variants), newest first, each with asset_id, level (scene/detail), edit_url and file_url. With asset_id: that asset\'s family (original + colour/material versions) and its edit link. Free.',
+    description: 'List recent GripForge Compute assets of the workspace (manufactures and variants), newest first, each with asset_id, kind, type, category, tags (engine, recipe, budget, near/scene, materials, style, licence…), needs_rig, level (scene/detail), edit_url and file_url. With asset_id: that asset\'s family (original + colour/material versions) and its edit link. Free.',
     inputSchema: { asset_id: schema.string().max(160).optional(), limit: schema.number().int().min(1).max(100).optional(), workspace_id: workspace },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async (args, extra) => typeof args.asset_id === 'string'
