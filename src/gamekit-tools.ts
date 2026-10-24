@@ -5,6 +5,7 @@ import type { VfxProjectRegister } from './vfx-project-tools.js';
 import { LOOK_VALUES, LOOK_DESCRIPTION } from './look.js';
 import { DOC_TOPICS, docSections, findDoc, readDoc } from './docs.generated.js';
 import { CONTROL_SCHEME_IDS, GAMEPLAY_CHOICES_BLOCK } from './gameplay-choices.generated.js';
+import { ANIM_LAYERS_TABLE } from './anim-layers.generated.js';
 
 /** Where the logic of the kits runs: wasm = the Rust kit host compiled to wasm (Bevy player only, falls back to ts), ts = the TypeScript KitHost (on request only). Default wasm. */
 export const PROJECT_LOGIC = ['wasm', 'ts'] as const;
@@ -39,6 +40,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_game_theme_from_concept',
   'gripforge_game_asset_plan',
   'gripforge_gamekit_creatures',
+  'gripforge_gamekit_anim_layers',
   'gripforge_game_engine',
   'gripforge_game_content',
   'gripforge_game_mods',
@@ -759,6 +761,44 @@ export function registerGameKitTools(
         return api(path, args, 'GET', extra?.signal, { propose: action === 'propose' ? 1 : undefined, slot: typeof args.slot === 'string' ? args.slot : undefined, limit: typeof args.limit === 'number' ? args.limit : undefined });
       }
       return api(path, { workspace_id: args.workspace_id, action, slots: args.slots, wait: args.wait, brief: args.brief }, 'POST', extra?.signal);
+    },
+  );
+
+  tool(
+    'gripforge_gamekit_anim_layers',
+    'Animation layers: what an action keeps or blends of the body, and of the movement',
+    'The animation layers of the characters of a Game Kit project (gkp_…), part of the generic animation layer of the kits (packages/gamekits/src/runtime/anim-layers.ts, mixed in Rust by the players: Bevy on the web and natively, libgfkits for Godot / Unity / Unreal). An action (attack, heavy_attack, punch, kick, ability, shoot, reload, throw, block, emote, interact, hit, body) plays on the parts of the body its layer takes over the locomotion, which keeps the rest: attacking while running keeps the legs running and the player moving. Defaults: a one-hand attack while moving = upper body (legs and hips to the locomotion, waist blended), standing still = whole body; movement free. NEVER recode a blend of animations, a bone mask or a movement lock in game code: set the layer here. action=table (default): the masks (full, upper, torso, lower, legs, arms, arm_right, arm_left, head, upper_right, upper_left; regions hips, spine, chest, head, arm_l, arm_r, leg_l, leg_r), the action families with their states and their default layer. action=get: the layers the project sets — actionLayers of its character kits (character.third_person, character.first_person, character.top_down: by family or by state such as attack3) and weaponLayers of weapons.loadout (by weapon id). action=set { kit, key, layer }: one entry, layer = { mask, still, weight, mode: replace | additive, fadeIn, fadeOut, movement: free | slow | lock | root, moveScale } (mask / still: a mask name or { regions: { <region>: 0..1 }, bones: { <bone>: 0..1 } }); the kit validates it, mods may override it (the keys are moddable), the hook character.action decides the movement once per action and player.action reports it. action=clear { kit, key }: back to the defaults. Existing games get the defaults without any change; nothing is recompiled. 0 credits.',
+    {
+      project_id: projectId.optional(),
+      action: schema.enum(['table', 'get', 'set', 'clear']).optional().describe('table (default) | get | set | clear.'),
+      kit: schema.enum(['character.third_person', 'character.first_person', 'character.top_down', 'weapons.loadout']).optional().describe('set / clear: the kit whose table is changed (weapons.loadout: by weapon id).'),
+      key: schema.string().max(64).optional().describe('set / clear: an action family (attack, shoot…), a state (attack3) or, for weapons.loadout, a weapon id.'),
+      layer: schema.record(schema.string(), schema.unknown()).optional().describe('set: { mask, still, weight, mode, fadeIn, fadeOut, movement, moveScale }.'),
+      reason: schema.string().max(300).optional().describe('One sentence: why, recorded in the project history.'),
+    },
+    { readOnly: false },
+    async (args, extra) => {
+      const action = typeof args.action === 'string' ? args.action : 'table';
+      if (action === 'table') {
+        const out = { ...ANIM_LAYERS_TABLE, regions: ['hips', 'spine', 'chest', 'head', 'arm_l', 'arm_r', 'leg_l', 'leg_r'], movements: ['free', 'slow', 'lock', 'root'] };
+        return { structuredContent: out as unknown as Record<string, unknown>, content: [{ type: 'text', text: JSON.stringify(out) }] };
+      }
+      if (typeof args.project_id !== 'string') return fail('project_id is required.');
+      const project = enc(args.project_id);
+      if (action === 'get') {
+        const res = await api(`gamekit-projects/${project}/kits`, args, 'GET', extra?.signal);
+        if (res.isError) return res;
+        const kits = ((res.structuredContent as { kits?: Array<{ id?: string; config?: Record<string, unknown> }> } | undefined)?.kits ?? [])
+          .filter((k) => k.id === 'weapons.loadout' || k.id === 'character.third_person' || k.id === 'character.first_person' || k.id === 'character.top_down')
+          .map((k) => ({ kit: k.id, field: k.id === 'weapons.loadout' ? 'weaponLayers' : 'actionLayers', layers: (k.config ?? {})[k.id === 'weapons.loadout' ? 'weaponLayers' : 'actionLayers'] ?? {} }));
+        const out = { kits, note: 'Empty: the defaults of action=table. The kit host resolves defaults < family < state < weapon.' };
+        return { structuredContent: out as unknown as Record<string, unknown>, content: [{ type: 'text', text: JSON.stringify(out) }] };
+      }
+      if (typeof args.kit !== 'string' || typeof args.key !== 'string' || !args.key) return fail('kit and key are required.');
+      if (action === 'set' && (!args.layer || typeof args.layer !== 'object')) return fail('layer is required.');
+      const field = args.kit === 'weapons.loadout' ? 'weaponLayers' : 'actionLayers';
+      const value = action === 'set' ? args.layer : {};
+      return api(`gamekit-projects/${project}/kits/${enc(args.kit)}`, { workspace_id: args.workspace_id, patch: { set: { [`${field}.${args.key}`]: value } }, ...(typeof args.reason === 'string' ? { reason: args.reason } : {}) }, 'PATCH', extra?.signal);
     },
   );
 
