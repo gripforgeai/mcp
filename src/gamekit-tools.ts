@@ -70,6 +70,9 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_configure_render_preview',
   'gripforge_render_preview',
   'gripforge_cancel_render_preview',
+  // debug.inspector of a game open in a browser by the team: its snapshot (gripforge.debug/1) and its ops.
+  'gripforge_debug_snapshot',
+  'gripforge_debug_set',
 ] as const;
 
 /**
@@ -304,6 +307,29 @@ export function registerGameKitTools(
           payload: operation === 'configure_render_preview' ? { mode: args.mode } : {} },
       }, 'POST', extra?.signal));
   }
+
+  // debug.inspector (docs/debug-inspector.md): the same contract as the panel of the team, on the play page a member
+  // of the workspace has open (its session of the runtime mailbox); the page answers through the kit and the player.
+  const debugSession = schema.string().max(96).optional().describe('A play session (play-…) of gripforge_runtime_sessions; default: the latest play page of the project.');
+  const debugWait = schema.number().min(0).max(20).optional().describe('Seconds to wait for the page to answer (default 8); 0 answers at once with status received.');
+  tool('gripforge_debug_snapshot', 'Debug snapshot of a running game',
+    'Read the debug inspector of a game open in a browser by a member of its workspace (the play page, Bevy player): frame rate and frame time (p50/p95/p99, worst, slow frames, stages of a frame), GPU and backend (webgpu, webgl2, vulkan, dx12, metal…, software rasteriser or not), draws, meshes, triangles, materials, lights, textures and their memory, entities, memory; the modes (wireframe, colliders, bounds), the selection, hidden and outlined nodes, the debug modes the kits registered and their data; with tree=true the scene tree (scenes, nodes, meshes with vertices / triangles / material, world boxes) within depth and max_nodes. JSON contract gripforge.debug/1, identical on every engine. Use it to find why a game is slow or wrong before changing it. Same rights as the panel: members of the workspace. 0 credits.',
+    { project_id: projectId, session_id: debugSession, tree: schema.boolean().optional().describe('Also build the scene tree (default false).'),
+      depth: schema.number().int().min(1).max(64).optional().describe('Levels of the tree (default 6).'),
+      max_nodes: schema.number().int().min(1).max(20000).optional().describe('Nodes of the tree at most (default 2000).'), wait_seconds: debugWait },
+    { readOnly: true },
+    async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/debug`, {
+      action: 'snapshot', session_id: args.session_id, wait_seconds: args.wait_seconds, workspace_id: args.workspace_id,
+      ...(args.tree ? { ops: [{ op: 'tree', ...(args.depth ? { depth: args.depth } : {}), ...(args.max_nodes ? { maxNodes: args.max_nodes } : {}) }] } : {}),
+    }, 'POST', extra?.signal, undefined, 30_000));
+  tool('gripforge_debug_set', 'Drive the debug inspector of a running game',
+    'Send ops of gripforge.debug/1 to the debug inspector of a game open in a browser by a member of its workspace, then read the snapshot: { op: "mode", wireframe?, colliders?, bounds? } (wireframe, collision boxes, mesh bounds), { op: "tree", root?, depth?, maxNodes? }, { op: "select", ids }, { op: "hide", id, hidden }, { op: "outline", id, on }, { op: "reset" } (show everything, no outline), { op: "extension", id, on } (a debug mode of a kit, e.g. ai.navigation.paths), { op: "open" } / { op: "close" } (the panel on screen). Ids are those of the snapshot tree. Nothing is saved in the project. Same rights as the panel: members of the workspace. 0 credits.',
+    { project_id: projectId, session_id: debugSession,
+      ops: schema.union([schema.record(schema.string(), schema.unknown()), schema.array(schema.record(schema.string(), schema.unknown())).max(64)]).describe('One op or a list of ops.'), wait_seconds: debugWait },
+    { readOnly: false },
+    async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/debug`, {
+      action: 'set', ops: args.ops, session_id: args.session_id, wait_seconds: args.wait_seconds, workspace_id: args.workspace_id,
+    }, 'POST', extra?.signal, undefined, 30_000));
 
   tool(
     'gripforge_game_web_export',
@@ -770,7 +796,7 @@ export function registerGameKitTools(
     'Animation layers: what an action keeps or blends of the body, and of the movement',
     'The animation layers of the characters of a Game Kit project (gkp_…), part of the generic animation layer of the kits (packages/gamekits/src/runtime/anim-layers.ts, mixed in Rust by the players: Bevy on the web and natively, libgfkits for Godot / Unity / Unreal). An action (attack, heavy_attack, punch, kick, ability, shoot, reload, throw, block, emote, interact, hit, body) plays on the parts of the body its layer takes over the locomotion, which keeps the rest: attacking while running keeps the legs running and the player moving. Defaults: a one-hand attack while moving = upper body (legs and hips to the locomotion, waist blended), standing still = whole body; movement free. NEVER recode a blend of animations, a bone mask or a movement lock in game code: set the layer here. action=table (default): the masks (full, upper, torso, lower, legs, arms, arm_right, arm_left, head, upper_right, upper_left; regions hips, spine, chest, head, arm_l, arm_r, leg_l, leg_r), the action families with their states and their default layer. action=get: the layers the project sets — actionLayers of its character kits (character.third_person, character.first_person, character.top_down: by family or by state such as attack3) and weaponLayers of weapons.loadout (by weapon id). action=set { kit, key, layer }: one entry, layer = { mask, still, weight, mode: replace | additive, fadeIn, fadeOut, movement: free | slow | lock | root, moveScale } (mask / still: a mask name or { regions: { <region>: 0..1 }, bones: { <bone>: 0..1 } }); the kit validates it, mods may override it (the keys are moddable), the hook character.action decides the movement once per action and player.action reports it. action=clear { kit, key }: back to the defaults. Existing games get the defaults without any change; nothing is recompiled. 0 credits.',
     {
-      project_id: projectId.optional(),
+      project_id: projectId.optional().describe('Game Kit project id (gkp_…): required for get, set and clear; table needs none.'),
       action: schema.enum(['table', 'get', 'set', 'clear']).optional().describe('table (default) | get | set | clear.'),
       kit: schema.enum(['character.third_person', 'character.first_person', 'character.top_down', 'weapons.loadout']).optional().describe('set / clear: the kit whose table is changed (weapons.loadout: by weapon id).'),
       key: schema.string().max(64).optional().describe('set / clear: an action family (attack, shoot…), a state (attack3) or, for weapons.loadout, a weapon id.'),
