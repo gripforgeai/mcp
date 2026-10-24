@@ -34,10 +34,14 @@ export function registerAssetProductionTools(register: VfxProjectRegister, optio
     title: 'Estimate generation usage before spending',
     description: 'Free quote for a model, concept, texture, rig or animation. Reports the account funding mode, available balance and estimated operation cost. A subscription combines AI and paid asset generation in one monthly limit without also charging generation credits. Quote every missing role, propose the plan, and obtain a generation budget before submitting paid jobs. Estimates cover one operation, not the full concept/rig/review pipeline.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    inputSchema: { kind: schema.enum(['model','concept','texture','rig','animation']), provider: schema.enum(['meshy','tripo','compute','xai','openai']).optional(), count: schema.number().int().min(1).max(20).optional(), workspace_id: workspace },
+    inputSchema: { kind: schema.enum(['model','concept','texture','rig','animation']), provider: schema.enum(['meshy','tripo','compute','xai','openai']).optional(), count: schema.number().int().min(1).max(20).optional(),
+      source: schema.enum(['image', 'text']).optional().describe('provider compute: text = four images first (then the 3D when one is validated), image = image → 3D (default)'),
+      auto_pick: schema.boolean().optional().describe('provider compute, source text: images + 3D in one (first image taken)'), workspace_id: workspace },
   }, wrap(args => {
     const params = new URLSearchParams({ kind: String(args.kind), count: String(args.count ?? 1) });
     if (args.provider) params.set('provider', String(args.provider));
+    if (args.provider === 'compute' && args.source) params.set('source', String(args.source));
+    if (args.provider === 'compute' && args.auto_pick === true) params.set('auto_pick', '1');
     return request(`generation-quote?${params}`, args.workspace_id);
   }));
   register('gripforge_asset_search', {

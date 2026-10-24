@@ -26,7 +26,7 @@ import { gameReadyLines, registerAssetProductionTools } from './asset-production
 import { registerAdminAssetTools } from './admin-asset-tools.js';
 import { registerCreatureRigTools } from './creature-rig-tools.js';
 import { registerCreatureGenerationTools } from './creature-generation-tools.js';
-import { registerComputeTools } from './compute-tools.js';
+import { absolute, computeGenerateShape, computeGenerator, registerComputeTools } from './compute-tools.js';
 import { registerFacialRigTools } from './facial-rig-tools.js';
 import { registerGameAudioTools } from './game-audio-tools.js';
 import { registerVoiceProfileTools } from './voice-profile-tools.js';
@@ -85,6 +85,8 @@ registerHeroAbilityTools((server as unknown as { registerTool: VfxProjectRegiste
 registerGameCreationTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerAssetProductionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerComputeTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY, local: true, readFile: path => readFile(resolve(path)), writeFile: async (path, bytes) => { const dest = resolve(path); await mkdir(dirname(dest), { recursive: true }); await writeFile(dest, bytes); return dest; } });
+/** GripForge Compute through gripforge_generate_prop (provider compute, stage quote → generate): the single door. */
+const computeGenerate = computeGenerator({ apiUrl: API_URL, getApiKey: () => API_KEY, local: true, readFile: path => readFile(resolve(path)) });
 registerAdminAssetTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 
 const err = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
@@ -709,26 +711,33 @@ server.tool(
 
 server.tool(
   'gripforge_generate_prop',
-  'CREATE a game-ready prop GLB (kart, crate, banana, barrier…) and save it to Library as kind=prop. Default Meshy, no T-pose, no rig. polycount default 4000. Quoted against the shared subscription, or 10 GripForge credits if it cannot cover the complete operation. Returns a durable job_id; poll gripforge_generation_read.',
+  'CREATE a game-ready prop GLB (kart, crate, banana, barrier…) and save it to Library as kind=prop. Default Meshy, no T-pose, no rig. polycount default 4000. Quoted against the shared subscription, or 10 GripForge credits if it cannot cover the complete operation. Returns a durable job_id; poll gripforge_generation_read. provider=compute (GripForge Compute, only when asked): stage=quote (free) then stage=generate with quote_token + confirm=true; router type, size, several assets (items), text → four images to validate (gripforge_compute_validate) unless auto_pick; returns studio_url.',
   {
     idempotency_key: z.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable asset request key; reuse after an uncertain response.'),
-    prompt: z.string().min(3).max(2000).describe('e.g. compact orange open-cockpit racing kart, isolated. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
+    prompt: z.string().min(3).max(2000).optional().describe('Required, except provider compute with an image or items. e.g. compact orange open-cockpit racing kart, isolated. Up to 2000 characters: the on-demand GPU (provider gpu) always takes them; another provider refuses a text over its own limit with the error prompt_too_long_for_provider.'),
     name: z.string().max(160).optional(),
     polycount: z.number().optional().describe('Target triangles (default 4000)'),
-    provider: z.enum(['meshy', 'tripo', 'gpu', 'compute']).optional().describe('Default meshy (or the server default). ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).' + ' compute = GripForge Compute, ONLY when the user asks for it: textured prop/furniture from text or one concept_item, two GLBs (scene, detail), quoted and charged like the other providers; not for weapons or vehicles; refused while Compute is closed. Without provider the default generator is used.'),
+    provider: z.enum(['meshy', 'tripo', 'gpu', 'compute']).optional().describe('Default meshy (or the server default). ' + 'gpu = our rented GPU: Hunyuan3D 2.1 (default engine) or TRELLIS.2 image-to-3D, then the game-ready chain (shape gate, normalisation, decimation, normal + AO bake from the high-poly, collider for props/weapons, meta.gameReady verdict); text-only first makes a concept image; no Tripo/Meshy spend. The server default can be gpu (GRIPFORGE_FORGE_DEFAULT=gpu|meshy).' + ' compute = GripForge Compute, ONLY when the user asks for it: textured asset from text, one image (concept_item, image_base64) or several (items), two GLBs (scene, detail), quoted and charged like the other providers; type picks the router asset type (furniture, building, vegetation, vehicle, character…); weapons are refused; refused while Compute is closed. Without provider the default generator is used.'),
     engine: z.enum(['hunyuan', 'trellis2']).optional().describe('GPU engine, only with provider gpu: hunyuan (Hunyuan3D 2.1, shape then paint) or trellis2 (TRELLIS.2). Server default GRIPFORGE_GPU_ENGINE, else hunyuan.'),
     concept_item: z.string().min(1).max(160).optional().describe('Owned concept image in this workspace (image-to-3D): Meshy by default, or our GPU with provider gpu (Hunyuan or TRELLIS.2 from this exact image).'),
     concept_items: z.array(z.string().min(1).max(160)).min(2).max(4).optional().describe('2–4 distinct owned views of the SAME prop for Meshy multi-image-to-3D. Do not combine with concept_item. Geometry standard/2k only. With provider gpu + engine trellis2: exactly 4 level views in the order front, left, back, right — Pixal3D builds the shape from all four.'),
     meshQuality: z.object({ geometry: z.enum(['standard', '2k', '4k']), texture: z.enum(['2k', '4k', '8k']) }).optional().describe('Meshy geometry and PBR texture quality. Requested texture resolution is retained through optimization.'),
     optimize: z.boolean().optional().describe('Default true; false retains the provider mesh for close-up review.'),
     out_dir: z.string().optional().describe('After the durable job completes, use gripforge_library_pull with this out_dir.'),
+    ...(computeGenerateShape(z as never, true) as unknown as Record<string, z.ZodTypeAny>),
     subtype: z.enum(['vehicle', 'none']).optional().describe('vehicle: made as the Vehicles prop sub-kind — no grip style, nose on +Z, the four wheels split with hub pivots so it drives. Then finished like a game car: paint, glass, chrome, grille and lamp materials, smoothed body, modelled wheels. Detected from the prompt (car, truck, van, kart…) when omitted; none opts out.'),
   },
-  async ({ idempotency_key, prompt, name, polycount, provider, engine, concept_item, concept_items, meshQuality, optimize, out_dir, subtype }) => {
+  async (input) => {
+    // The Compute fields (computeGenerateShape) are typed loosely here: the npm server's zod and the shared shape differ.
+    const args = input as typeof input & Record<string, unknown>;
+    const { idempotency_key, prompt, name, polycount, provider, engine, concept_item, concept_items, meshQuality, optimize, out_dir, subtype } = args;
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
+    // GripForge Compute, quote then confirmed launch (or several assets): the shared Compute path of the single door.
+    if (provider === 'compute' && (args.stage || args.items)) return computeGenerate(args as Record<string, unknown>) as never;
+    if (!prompt && provider !== 'compute') return err('prompt is required.');
     const res = await fetch(`${API_URL}/api/v1/generate-character`, {
       method: 'POST',
-      headers: { ...apiHeaders(), 'content-type': 'application/json' },
+      headers: { ...apiHeaders(), 'content-type': 'application/json', ...(typeof args.workspace_id === 'string' ? { 'x-workspace-id': args.workspace_id } : {}) },
       body: JSON.stringify({
         idempotency_key,
         prompt,
@@ -737,6 +746,9 @@ server.tool(
         subtype,
         polycount: polycount ?? 4000,
         provider, ...(provider === 'gpu' && engine ? { engine } : {}), concept_item, concept_items, meshQuality, optimize,
+        // provider compute in one call: the Compute fields go through the same door.
+        ...(provider === 'compute' ? { type: args.type, object_type: args.object_type, quality: args.quality, triangles: args.triangles, options: args.options, source: args.source,
+          ...(args.image_path ? { image_base64: (await readFile(resolve(String(args.image_path)))).toString('base64') } : args.image_base64 ? { image_base64: args.image_base64 } : {}) } : {}),
       }),
     });
     const data = (await res.json().catch(() => ({}))) as {
@@ -757,7 +769,7 @@ server.tool(
         wrote.push(dest);
       }
     }
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ ...data, wrote, ...(out_dir && !wrote.length ? { next: 'Poll gripforge_generation_read, then gripforge_library_pull with the completed asset id and this out_dir.', requested_out_dir: out_dir } : {}) }, null, 2) }] };
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ ...(absolute(data, API_URL) as object), wrote, ...(out_dir && !wrote.length ? { next: 'Poll gripforge_generation_read, then gripforge_library_pull with the completed asset id and this out_dir.', requested_out_dir: out_dir } : {}) }, null, 2) }] };
   },
 );
 
@@ -1047,7 +1059,7 @@ server.tool(
 
 server.tool(
   'gripforge_library_list',
-  'List the GripForge Library locker (characters, enemies, weapons, props, textures, HUD, buttons, binds). Filter by kind and/or game style. Every item carries `rank` {score/100, grade A–D, reasons}: fitness for a GripForge game; sort=rank lists the best fit first.',
+  'List the GripForge Library locker (characters, enemies, weapons, props, textures, HUD, buttons, binds). Filter by kind and/or game style. Every item carries `rank` {score/100, grade A–D, reasons}: fitness for a GripForge game; sort=rank lists the best fit first. engine filters on the generator: engine=compute lists GripForge Compute assets (manufactures and variants), each with a `compute` block {level scene/detail, family, triangles, edit_url, file_url}.',
   {
     kind: KIND.optional().describe('Filter by kind'),
     q: z.string().optional().describe('Search name/filename'),
@@ -1055,8 +1067,11 @@ server.tool(
     style: z.string().optional().describe('Game look id or alias (e.g. souls-like, open-world-adventure)'),
     sort: z.enum(['newest', 'rank']).optional().describe('newest (default) or rank: best fit first'),
     target: z.enum(['mobile', 'desktop']).optional().describe('Platform for the rank budgets. Defaults to mobile.'),
+    engine: z.string().regex(/^[a-z0-9_-]{2,40}$/).optional().describe('Generator that made the item: compute (GripForge Compute), meshy, tripo, gpu…'),
+    limit: z.number().int().min(1).max(500).optional().describe('Page size (default 200)'),
+    workspace_id: z.string().max(100).optional().describe('Explicit workspace id. The key must have access to it.'),
   },
-  async ({ kind, q, subtype, style, sort, target }) => {
+  async ({ kind, q, subtype, style, sort, target, engine, limit, workspace_id }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const qs = new URLSearchParams();
     if (kind) qs.set('kind', kind);
@@ -1065,10 +1080,12 @@ server.tool(
     if (style) qs.set('style', style);
     if (sort === 'rank') qs.set('sort', 'rank');
     if (target) qs.set('target', target);
-    const res = await fetch(`${API_URL}/api/v1/library?${qs}`, { headers: apiHeaders() });
+    if (engine) qs.set('engine', engine);
+    if (limit) qs.set('limit', String(limit));
+    const res = await fetch(`${API_URL}/api/v1/library?${qs}`, { headers: { ...apiHeaders(), ...(workspace_id ? { 'x-workspace-id': workspace_id } : {}) } });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
-    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    return { content: [{ type: 'text' as const, text: JSON.stringify(absolute(data, API_URL), null, 2) }] };
   },
 );
 
@@ -1096,15 +1113,15 @@ server.tool(
 
 server.tool(
   'gripforge_library_get',
-  'Get one Library item (metadata + signed file URL). A forged mesh shows its game-ready verdict first (meta.gameReady: ready, missing checks; meta.collider).',
-  { id: z.string().describe('Library id (lib_…)') },
-  async ({ id }) => {
+  'Get one Library item (metadata + signed file URL). A forged mesh shows its game-ready verdict first (meta.gameReady: ready, missing checks; meta.collider). A GripForge Compute asset also returns `compute` {edit_url, family: original + colour / material / polygon versions}.',
+  { id: z.string().describe('Library id (lib_…)'), workspace_id: z.string().max(100).optional().describe('Explicit workspace id. The key must have access to it.') },
+  async ({ id, workspace_id }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
-    const res = await fetch(`${API_URL}/api/v1/library/${encodeURIComponent(id)}`, { headers: apiHeaders() });
+    const res = await fetch(`${API_URL}/api/v1/library/${encodeURIComponent(id)}`, { headers: { ...apiHeaders(), ...(workspace_id ? { 'x-workspace-id': workspace_id } : {}) } });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return err(String((data as { error?: string }).error ?? res.status));
     // Le verdict « game-ready » (meta.gameReady) et le collider en tête, lisibles sans fouiller meta.
-    return { content: [{ type: 'text' as const, text: gameReadyLines((data as { item?: { meta?: Record<string, unknown> } }).item?.meta) + JSON.stringify(data, null, 2) }] };
+    return { content: [{ type: 'text' as const, text: gameReadyLines((data as { item?: { meta?: Record<string, unknown> } }).item?.meta) + JSON.stringify(absolute(data, API_URL), null, 2) }] };
   },
 );
 
@@ -1149,6 +1166,7 @@ server.tool(
     const res = await fetch(`${API_URL}/api/v1/library/${encodeURIComponent(id)}`, { headers: apiHeaders() });
     const data = (await res.json().catch(() => ({}))) as {
       error?: string;
+      compute?: { edit_url?: string };
       item?: {
         id: string;
         kind: string;
@@ -1218,7 +1236,8 @@ server.tool(
       content: [
         {
           type: 'text' as const,
-          text: JSON.stringify({ id: item.id, kind: item.kind, name: item.name, wrote }, null, 2),
+          // A GripForge Compute asset: its edit page in the 3D studio.
+          text: JSON.stringify({ id: item.id, kind: item.kind, name: item.name, wrote, ...(data.compute?.edit_url ? { edit_url: new URL(data.compute.edit_url, API_URL).href } : {}) }, null, 2),
         },
       ],
     };

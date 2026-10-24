@@ -55,7 +55,11 @@ export function registerSceneTools(register: VfxProjectRegister, options: { apiU
       }
       for (const result of [data, data.result, job?.result]) if (result && typeof result === 'object') {
         const row = result as Record<string, unknown>;
-        for (const key of ['studio_url', 'review_url', 'file_url', 'source_url', 'concept_url', 'status_url']) if (typeof row[key] === 'string' && row[key].startsWith('/')) row[key] = new URL(row[key], options.apiUrl).href;
+        for (const key of ['studio_url', 'review_url', 'file_url', 'source_url', 'concept_url', 'status_url', 'edit_url', 'image_url']) if (typeof row[key] === 'string' && row[key].startsWith('/')) row[key] = new URL(row[key], options.apiUrl).href;
+        // Generated assets (GripForge Compute: edit_url, file_url) and the images to validate get absolute links too.
+        for (const list of [row.assets, row.images]) if (Array.isArray(list)) for (const entry of list) if (entry && typeof entry === 'object') {
+          for (const [key, value] of Object.entries(entry as Record<string, unknown>)) if (typeof value === 'string' && value.startsWith('/') && /(_url|^url)$/.test(key)) (entry as Record<string, unknown>)[key] = new URL(value, options.apiUrl).href;
+        }
         if (Array.isArray(row.concept_views)) for (const view of row.concept_views) if (view && typeof view === 'object') {
           for (const key of ['image_url', 'preview_url', 'studio_url']) if (typeof view[key] === 'string' && view[key].startsWith('/')) view[key] = new URL(view[key], options.apiUrl).href;
         }

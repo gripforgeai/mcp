@@ -3,9 +3,11 @@ import { z } from 'zod/v4';
 import type { VfxProjectRegister } from './vfx-project-tools.js';
 
 /**
- * GripForge Compute: image or text → textured 3D prop (two GLBs), then colour / material variants of the same shape.
- * Every call goes to GripForge (quote, then confirmed launch, one debit); GripForge talks to the Compute router.
- * Each asset comes back with its direct edit page (`edit_url`) that the client can open.
+ * GripForge Compute: image or text → textured 3D asset (two GLBs), then colour / material variants of the same shape.
+ * Compute is one more engine of the generic tools: gripforge_generate_prop (provider compute), gripforge_generation_read,
+ * gripforge_library_list / get (engine compute) and gripforge_library_pull. The generate, job, assets and download
+ * tools below are kept as deprecated aliases of those (published since MCP 0.1.115, same response shape); status,
+ * variant and validate stay Compute's own. Every call goes to GripForge (quote, then confirmed launch, one debit).
  */
 export const COMPUTE_TOOL_NAMES = ['gripforge_compute_status', 'gripforge_compute_generate', 'gripforge_compute_job', 'gripforge_compute_assets', 'gripforge_compute_variant', 'gripforge_compute_download', 'gripforge_compute_validate'] as const;
 type Options = { apiUrl: string; getApiKey: () => string | null | undefined; local?: boolean; readFile?: (path: string) => Promise<Buffer>; writeFile?: (path: string, bytes: Buffer) => Promise<string> };
@@ -15,16 +17,16 @@ const fail = (text: string): Result => ({ isError: true, content: [{ type: 'text
 const ok = (data: Record<string, unknown>, isError = false): Result => ({ ...(isError ? { isError: true } : {}), structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] });
 
 /** Relative GripForge links (edit pages, files, status) become absolute so the client can open them. */
-function absolute(value: unknown, base: string): unknown {
+export function absolute(value: unknown, base: string): unknown {
   if (Array.isArray(value)) return value.map(v => absolute(v, base));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, typeof v === 'string' && v.startsWith('/') && /(_url|^url)$/.test(k) ? new URL(v, base).href : absolute(v, base)]));
 }
 
-export function registerComputeTools(register: VfxProjectRegister, options: Options, schema: typeof z = z) {
+/** HTTP to GripForge with the key and optional workspace; relative links come back absolute. */
+function computeCaller(options: Options) {
   const base = options.apiUrl.replace(/\/$/, '');
-  const workspace = schema.string().max(100).optional().describe('Explicit workspace id. The key must have access to it.');
-  async function call(path: string, init: { method?: string; body?: unknown; workspace?: unknown; signal?: AbortSignal } = {}) {
+  return async function call(path: string, init: { method?: string; body?: unknown; workspace?: unknown; signal?: AbortSignal } = {}) {
     const key = options.getApiKey();
     if (!key) return fail('GripForge API key required.');
     try {
@@ -36,20 +38,20 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
       const data = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as Record<string, unknown>;
       return ok(absolute(data, base) as Record<string, unknown>, !response.ok);
     } catch (error) { return fail(error instanceof Error ? error.message : 'GripForge Compute request failed.'); }
-  }
-  const editLinks = (assets: unknown, ws: unknown) => Array.isArray(assets) ? assets.map(a => {
-    const id = (a as { assetId?: string }).assetId;
-    return id ? { ...(a as object), edit_url: `${base}/generate-3d/studio?asset=${encodeURIComponent(id)}${typeof ws === 'string' ? `&workspace=${encodeURIComponent(ws)}` : ''}`, file_url: `${base}/api/v1/library/${encodeURIComponent(id)}/file?download=1` } : a;
-  }) : assets;
+  };
+}
 
-  register(COMPUTE_TOOL_NAMES[0], {
-    title: 'Compute · router status',
-    description: 'GripForge Compute readiness (free, read-only): whether generation is open, which actions the router can run now (image, text, couleur, matiere) and a machine summary (ready / busy / starting). The router rents and stops its own machines; nothing is started by this call.',
-    inputSchema: {},
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, async (_args, extra) => call('/api/v1/compute-assets', { signal: extra?.signal }));
+type Item = { name?: unknown; prompt?: unknown; image_base64?: unknown; image_path?: unknown; concept_item?: unknown; source?: unknown };
+/** Arguments of a Compute generation (gripforge_generate_prop provider compute, and its alias gripforge_compute_generate). */
+export type ComputeGenerateArgs = Record<string, unknown>;
 
-  type Item = { name?: unknown; prompt?: unknown; image_base64?: unknown; image_path?: unknown; source?: unknown };
+/**
+ * GripForge Compute generation through the single door (`POST /api/v1/generate-asset`, `provider: "compute"`):
+ * stage quote (free) then generate (confirmed, one token per asset), one request per asset (images stay under the
+ * request size), own idempotency key each. Shared by gripforge_generate_prop and its deprecated alias.
+ */
+export function computeGenerator(options: Options) {
+  const base = options.apiUrl.replace(/\/$/, ''), call = computeCaller(options);
   async function imageOf(item: Item): Promise<string | Result> {
     if (typeof item.image_path === 'string' && options.readFile) {
       const bytes = await options.readFile(item.image_path).catch(() => null);
@@ -58,17 +60,93 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
       return `data:${mime};base64,${bytes.toString('base64')}`;
     }
     if (typeof item.image_base64 === 'string') return item.image_base64.startsWith('data:') ? item.image_base64 : `data:${item.image_base64.startsWith('/9j/') ? 'image/jpeg' : item.image_base64.startsWith('UklG') ? 'image/webp' : 'image/png'};base64,${item.image_base64}`;
-    return fail('An image item needs image_base64' + (options.local ? ' or image_path.' : '.'));
+    return fail('An image item needs image_base64' + (options.local ? ', image_path' : '') + ' or concept_item.');
   }
+  const studioUrl = (job: string, ws: unknown) => `${base}/generate-3d/studio?job=${encodeURIComponent(job)}${typeof ws === 'string' ? `&workspace=${encodeURIComponent(ws)}` : ''}`;
+  return async (args: ComputeGenerateArgs, signal?: AbortSignal): Promise<Result> => {
+    const list = Array.isArray(args.items) ? args.items as Item[] : [{ name: args.name, prompt: args.prompt, image_base64: args.image_base64, image_path: args.image_path, concept_item: args.concept_item, source: args.source }];
+    if (!Array.isArray(args.items) && typeof args.name !== 'string') return fail('Give name (single asset) or items.');
+    const tokens = Array.isArray(args.items) ? (Array.isArray(args.quote_tokens) ? args.quote_tokens as string[] : []) : typeof args.quote_token === 'string' ? [args.quote_token] : [];
+    if (args.stage === 'generate' && (args.confirm !== true || tokens.length !== list.length)) return fail('stage=generate needs one quote token per asset (quote_token, or quote_tokens in item order) from a quote with the same inputs, and confirm=true after the user accepted the price.');
+    const batchKey = typeof args.idempotency_key === 'string' ? args.idempotency_key : `compute:mcp:${randomUUID()}`;
+    const out: Record<string, unknown>[] = [];
+    for (const [index, item] of list.entries()) {
+      const hasImage = item.image_base64 !== undefined || item.image_path !== undefined || item.concept_item !== undefined;
+      const text = item.source === 'text' || (item.source === undefined && typeof item.prompt === 'string' && !hasImage);
+      let image: string | undefined;
+      if (!text && typeof item.concept_item !== 'string') { const r = await imageOf(item); if (typeof r !== 'string') return r; image = r; }
+      else if (text && typeof item.prompt !== 'string') return fail(`${String(item.name)}: a text asset needs prompt.`);
+      const body = {
+        provider: 'compute', action: args.stage, source: text ? 'text' : 'image', name: item.name, ...(typeof args.type === 'string' ? { type: args.type } : {}), budget: args.object_type ?? (typeof args.type === 'string' && !['objet', 'meuble'].includes(args.type) ? 'defaut' : 'mobilier_simple'), quality: args.quality ?? 'standard',
+        options: text ? [] : args.options ?? ['photo', 'matieres', 'relief'], ...(text ? { prompt: item.prompt, ...(args.auto_pick === true ? { auto_pick: true } : {}) } : { ...(image ? { image } : { concept_item: item.concept_item }), ...(typeof args.triangles === 'number' ? { triangles: args.triangles } : {}) }),
+        ...(args.stage === 'generate' ? { accepted_quote: tokens[index], idempotency_key: list.length > 1 ? `${batchKey.slice(0, 150)}:${index}` : batchKey } : {}),
+      };
+      const result = await call('/api/v1/generate-asset', { method: 'POST', body, workspace: args.workspace_id, signal });
+      const data = (result.structuredContent ?? {}) as { quote?: { token?: string; estimated_credits?: number; estimated_maximum_usd?: number }; job?: { id?: string; status?: string }; error?: string };
+      if (result.isError) out.push({ name: item.name, error: data.error ?? result.content[0]?.text });
+      else if (args.stage === 'quote') out.push({ name: item.name, quote: data.quote });
+      else out.push({ name: item.name, job_id: data.job?.id, status: data.job?.status, quote: data.quote, status_url: `${base}/api/v1/generation-jobs/${data.job?.id}`, studio_url: data.job?.id ? studioUrl(data.job.id, args.workspace_id) : undefined });
+    }
+    const failed = out.filter(o => o.error).length;
+    const quotes = out.map(o => o.quote as { estimated_credits?: number; estimated_maximum_usd?: number } | undefined).filter(Boolean) as { estimated_credits?: number; estimated_maximum_usd?: number }[];
+    const data: Record<string, unknown> = Array.isArray(args.items) ? { items: out } : { ...out[0] };
+    if (args.stage === 'quote') {
+      data.total = { credits: quotes.reduce((s, q) => s + (q.estimated_credits ?? 0), 0), usd: quotes.reduce((s, q) => s + (q.estimated_maximum_usd ?? 0), 0) };
+      data.next = 'Show the prices to the user. If accepted, call again with stage=generate, the same inputs, the tokens (quote_token or quote_tokens in order) and confirm=true.';
+    } else data.next = 'Poll gripforge_generation_read with each job_id until its status is succeeded; open studio_url to follow them in the 3D studio.';
+    return ok(data, failed === out.length);
+  };
+}
+
+/** The Compute fields gripforge_generate_prop gains (provider compute), shared by the npm and hosted servers. */
+export function computeGenerateShape(schema: typeof z, local: boolean) {
+  const itemShape = schema.object({
+    name: schema.string().min(1).max(100), prompt: schema.string().min(3).max(500).optional(), image_base64: schema.string().max(12_000_000).optional(), concept_item: schema.string().min(1).max(160).optional(),
+    ...(local ? { image_path: schema.string().max(1000).optional() } : {}),
+  });
+  return {
+    stage: schema.enum(['quote', 'generate']).optional().describe('provider compute: quote first (free, returns quote.token and the price), then generate with quote_token and confirm=true. Without stage, provider compute quotes and launches in one call (a text takes its first image).'),
+    source: schema.enum(['image', 'text']).optional().describe('provider compute, single asset: default text when only prompt is given, image with image_base64' + (local ? ' / image_path' : '') + ' / concept_item'),
+    image_base64: schema.string().max(12_000_000).optional().describe('provider compute, source=image: PNG/JPEG/WebP, raw base64 or data URI, up to 8 MB'),
+    ...(local ? { image_path: schema.string().max(1000).optional().describe('provider compute, source=image: local PNG/JPEG/WebP file (instead of image_base64)') } : {}),
+    items: schema.array(itemShape).min(1).max(5).optional().describe('provider compute: several assets at once, [{name, prompt} or {name, image_base64' + (local ? '|image_path' : '') + '|concept_item}], one quote and one job each'),
+    type: schema.enum(['objet', 'meuble', 'batiment', 'vegetation', 'vehicule', 'personnage', 'mob', 'creature']).optional().describe('provider compute: router asset type (gripforge_compute_status lists those available now). personnage / mob / creature: the mesh only; rig it afterwards in the Character studio. Weapons are refused'),
+    object_type: schema.string().regex(/^[a-z_]{2,40}$/).optional().describe('provider compute: size (budget) of the type, e.g. petit_objet, mobilier_simple; default: the type\'s default'),
+    quality: schema.enum(['standard', 'detail']).optional().describe('provider compute: texture quality, default standard'),
+    triangles: schema.number().int().min(500).max(200000).optional().describe('provider compute, image assets: exact triangle count of the « near » GLB (the « scene » one gets half)'),
+    options: schema.array(schema.enum(['photo', 'matieres', 'relief'])).max(3).optional().describe('provider compute, image assets: photo, matieres, relief (default all three)'),
+    auto_pick: schema.boolean().optional().describe('provider compute, text: true = take the first of the four images without asking (only when the user wants it). Default with stage: stop on the images; show them (gripforge_generation_read images[]) and validate one with gripforge_compute_validate'),
+    quote_token: schema.string().length(64).optional().describe('provider compute, stage=generate: quote.token of the quote with the SAME inputs'),
+    quote_tokens: schema.array(schema.string().length(64)).max(5).optional().describe('provider compute, stage=generate with items: the quote tokens in item order'),
+    confirm: schema.boolean().optional().describe('provider compute, stage=generate: true once the user accepted the quoted price'),
+    workspace_id: schema.string().max(100).optional().describe('Explicit workspace id. The key must have access to it.'),
+  };
+}
+
+export function registerComputeTools(register: VfxProjectRegister, options: Options, schema: typeof z = z) {
+  const base = options.apiUrl.replace(/\/$/, '');
+  const workspace = schema.string().max(100).optional().describe('Explicit workspace id. The key must have access to it.');
+  const call = computeCaller(options), generate = computeGenerator(options);
+  const editLinks = (assets: unknown, ws: unknown) => Array.isArray(assets) ? assets.map(a => {
+    const id = (a as { assetId?: string }).assetId;
+    return id ? { ...(a as object), edit_url: `${base}/generate-3d/studio?asset=${encodeURIComponent(id)}${typeof ws === 'string' ? `&workspace=${encodeURIComponent(ws)}` : ''}`, file_url: `${base}/api/v1/library/${encodeURIComponent(id)}/file?download=1` } : a;
+  }) : assets;
   const studioUrl = (job: string, ws: unknown) => `${base}/generate-3d/studio?job=${encodeURIComponent(job)}${typeof ws === 'string' ? `&workspace=${encodeURIComponent(ws)}` : ''}`;
   const itemShape = schema.object({
     name: schema.string().min(1).max(100), prompt: schema.string().min(3).max(500).optional(), image_base64: schema.string().max(12_000_000).optional(),
     ...(options.local ? { image_path: schema.string().max(1000).optional() } : {}),
   });
 
+  register(COMPUTE_TOOL_NAMES[0], {
+    title: 'Compute · router status',
+    description: 'GripForge Compute readiness (free, read-only): whether generation is open, which actions the router can run now (image, text, couleur, matiere) and a machine summary (ready / busy / starting). The router rents and stops its own machines; nothing is started by this call.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async (_args, extra) => call('/api/v1/compute-assets', { signal: extra?.signal }));
+
   register(COMPUTE_TOOL_NAMES[1], {
-    title: 'Compute · generate 3D assets',
-    description: 'ON DEMAND ONLY: use when the user asks for GripForge Compute; the default 3D generator stays gripforge_generate_prop without provider. Make textured 3D prop/furniture assets with GripForge Compute from images or text descriptions: one asset (name + prompt or image) or several at once (items, up to 5; each item is one asset, from its prompt or its image). Two steps: stage=quote (free) returns each quote.token and the total price; show it to the user, then stage=generate with the tokens (quote_token, or quote_tokens in item order) and confirm=true launches one durable job per asset, each debited once after success with its own idempotency key. Text assets stop after four reference images (billed on their own): show them to the user, then gripforge_compute_validate with the chosen image (the 3D is quoted then, and billed when finished), or regenerate; auto_pick=true (only if the user asked) takes the first image and bills images + 3D once. Weapons, vehicles and characters are refused before any charge (use the default generator). Returns one job per asset with studio_url; poll gripforge_compute_job (several job_ids at once) for the GLBs and their edit_url.',
+    title: 'Compute · generate 3D assets (deprecated alias)',
+    description: 'DEPRECATED alias of gripforge_generate_prop with provider=compute (same request through the single generation door POST /api/v1/generate-asset, same answer); prefer that tool. ON DEMAND ONLY: use when the user asks for GripForge Compute; the default 3D generator stays gripforge_generate_prop without provider. Make textured 3D prop/furniture assets with GripForge Compute from images or text descriptions: one asset (name + prompt or image) or several at once (items, up to 5; each item is one asset, from its prompt or its image). Two steps: stage=quote (free) returns each quote.token and the total price; show it to the user, then stage=generate with the tokens (quote_token, or quote_tokens in item order) and confirm=true launches one durable job per asset, each debited once after success with its own idempotency key. Text assets stop after four reference images (billed on their own): show them to the user, then gripforge_compute_validate with the chosen image (the 3D is quoted then, and billed when finished), or regenerate; auto_pick=true (only if the user asked) takes the first image and bills images + 3D once. Weapons are refused before any charge; characters, mobs, creatures and vehicles need their type. Returns one job per asset with studio_url; poll gripforge_generation_read (or this alias family: gripforge_compute_job) for the GLBs and their edit_url.',
     inputSchema: {
       stage: schema.enum(['quote', 'generate']).describe('quote first (free), then generate'),
       source: schema.enum(['image', 'text']).optional().describe('Single asset: default image. Items: inferred from each item (prompt → text, image → image)'),
@@ -90,42 +168,11 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
       workspace_id: workspace,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, async (args, extra) => {
-    const list = Array.isArray(args.items) ? args.items as Item[] : [{ name: args.name, prompt: args.prompt, image_base64: args.image_base64, image_path: args.image_path, source: args.source }];
-    if (!Array.isArray(args.items) && typeof args.name !== 'string') return fail('Give name (single asset) or items.');
-    const tokens = Array.isArray(args.items) ? (Array.isArray(args.quote_tokens) ? args.quote_tokens as string[] : []) : typeof args.quote_token === 'string' ? [args.quote_token] : [];
-    if (args.stage === 'generate' && (args.confirm !== true || tokens.length !== list.length)) return fail('stage=generate needs one quote token per asset (quote_token, or quote_tokens in item order) from a quote with the same inputs, and confirm=true after the user accepted the price.');
-    const batchKey = typeof args.idempotency_key === 'string' ? args.idempotency_key : `compute:mcp:${randomUUID()}`;
-    const out: Record<string, unknown>[] = [];
-    for (const [index, item] of list.entries()) {
-      const text = item.source === 'text' || (item.source === undefined && typeof item.prompt === 'string' && item.image_base64 === undefined && item.image_path === undefined);
-      let image: string | undefined;
-      if (!text) { const r = await imageOf(item); if (typeof r !== 'string') return r; image = r; }
-      else if (typeof item.prompt !== 'string') return fail(`${String(item.name)}: a text asset needs prompt.`);
-      const body = {
-        action: args.stage, source: text ? 'text' : 'image', name: item.name, ...(typeof args.type === 'string' ? { type: args.type } : {}), budget: args.object_type ?? (typeof args.type === 'string' && !['objet', 'meuble'].includes(args.type) ? 'defaut' : 'mobilier_simple'), quality: args.quality ?? 'standard',
-        options: text ? [] : args.options ?? ['photo', 'matieres', 'relief'], ...(text ? { prompt: item.prompt, ...(args.auto_pick === true ? { auto_pick: true } : {}) } : { image, ...(typeof args.triangles === 'number' ? { triangles: args.triangles } : {}) }),
-        ...(args.stage === 'generate' ? { accepted_quote: tokens[index], idempotency_key: list.length > 1 ? `${batchKey.slice(0, 150)}:${index}` : batchKey } : {}),
-      };
-      const result = await call('/api/v1/compute-assets', { method: 'POST', body, workspace: args.workspace_id, signal: extra?.signal });
-      const data = (result.structuredContent ?? {}) as { quote?: { token?: string; estimated_credits?: number; estimated_maximum_usd?: number }; job?: { id?: string; status?: string }; error?: string };
-      if (result.isError) out.push({ name: item.name, error: data.error ?? result.content[0]?.text });
-      else if (args.stage === 'quote') out.push({ name: item.name, quote: data.quote });
-      else out.push({ name: item.name, job_id: data.job?.id, status: data.job?.status, quote: data.quote, status_url: `${base}/api/v1/generation-jobs/${data.job?.id}`, studio_url: data.job?.id ? studioUrl(data.job.id, args.workspace_id) : undefined });
-    }
-    const failed = out.filter(o => o.error).length;
-    const quotes = out.map(o => o.quote as { estimated_credits?: number; estimated_maximum_usd?: number } | undefined).filter(Boolean) as { estimated_credits?: number; estimated_maximum_usd?: number }[];
-    const data: Record<string, unknown> = Array.isArray(args.items) ? { items: out } : { ...out[0] };
-    if (args.stage === 'quote') {
-      data.total = { credits: quotes.reduce((s, q) => s + (q.estimated_credits ?? 0), 0), usd: quotes.reduce((s, q) => s + (q.estimated_maximum_usd ?? 0), 0) };
-      data.next = 'Show the prices to the user. If accepted, call again with stage=generate, the same inputs, the tokens (quote_token or quote_tokens in order) and confirm=true.';
-    } else data.next = 'Poll gripforge_compute_job with job_ids until each status is succeeded; open studio_url to follow them in the 3D studio.';
-    return ok(data, failed === out.length);
-  });
+  }, async (args, extra) => generate(args, extra?.signal));
 
   register(COMPUTE_TOOL_NAMES[2], {
-    title: 'Compute · follow jobs',
-    description: 'Read GripForge Compute jobs (generations or variants): job_id, or job_ids for several at once. Status (queued, running, succeeded, failed), current stage and stage counts. While the router waits, `attente` = {raison: demarrage_machine | aucune_machine | file | machine_occupee, position, depuis, estimation_s} (a machine start takes about 10 min the first time). On success, result.assets lists the GLBs (scene, detail) with asset_id, triangles, edit_url (open it to edit in the studio) and file_url. Free.',
+    title: 'Compute · follow jobs (deprecated alias)',
+    description: 'DEPRECATED alias of gripforge_generation_read (same GET /api/v1/generation-jobs/:id; that tool returns the same studio_url, attente, validation and result.assets edit_url / file_url). Read GripForge Compute jobs (generations or variants): job_id, or job_ids for several at once. Status (queued, running, succeeded, failed), current stage and stage counts. While the router waits, `attente` = {raison: demarrage_machine | aucune_machine | file | machine_occupee, position, depuis, estimation_s} (a machine start takes about 10 min the first time). On success, result.assets lists the GLBs (scene, detail) with asset_id, triangles, edit_url (open it to edit in the studio) and file_url. Free.',
     inputSchema: { job_id: schema.string().min(1).max(200).optional(), job_ids: schema.array(schema.string().min(1).max(200)).min(1).max(20).optional(), workspace_id: workspace },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async (args, extra) => {
@@ -142,13 +189,29 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
   });
 
   register(COMPUTE_TOOL_NAMES[3], {
-    title: 'Compute · list assets',
-    description: 'List recent GripForge Compute assets of the workspace (manufactures and variants), newest first, each with asset_id, kind, type, category, tags (engine, recipe, budget, near/scene, materials, style, licence…), needs_rig, level (scene/detail), edit_url and file_url. With asset_id: that asset\'s family (original + colour/material versions) and its edit link. Free.',
+    title: 'Compute · list assets (deprecated alias)',
+    description: 'DEPRECATED alias of gripforge_library_list with engine=compute (each item carries the same `compute` block) and of gripforge_library_get (its `compute` block: family and edit link). List recent GripForge Compute assets of the workspace (manufactures and variants), newest first, each with asset_id, kind, type, category, tags (engine, recipe, budget, near/scene, materials, style, licence…), needs_rig, level (scene/detail), edit_url and file_url. With asset_id: that asset\'s family (original + colour/material versions) and its edit link. Free.',
     inputSchema: { asset_id: schema.string().max(160).optional(), limit: schema.number().int().min(1).max(100).optional(), workspace_id: workspace },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, async (args, extra) => typeof args.asset_id === 'string'
-    ? call(`/api/v1/compute-assets/${encodeURIComponent(args.asset_id)}`, { workspace: args.workspace_id, signal: extra?.signal })
-    : call(`/api/v1/compute-assets/mine?limit=${Number(args.limit ?? 20)}`, { workspace: args.workspace_id, signal: extra?.signal }));
+  }, async (args, extra) => {
+    // The generic library: its `compute` block per item (list, engine=compute) and on the item card (asset_id).
+    if (typeof args.asset_id === 'string') {
+      const [card, status] = await Promise.all([
+        call(`/api/v1/library/${encodeURIComponent(args.asset_id)}`, { workspace: args.workspace_id, signal: extra?.signal }),
+        call('/api/v1/compute-assets', { signal: extra?.signal }),
+      ]);
+      if (card.isError) return card;
+      const compute = (card.structuredContent as { compute?: Record<string, unknown> } | undefined)?.compute;
+      if (!compute) return fail('This asset was not made with GripForge Compute in this workspace.');
+      const ready = (status.structuredContent ?? {}) as { capabilities?: unknown; available?: unknown };
+      return ok({ ...compute, capabilities: ready.capabilities, available: ready.available });
+    }
+    const limit = Math.max(1, Math.min(100, Math.trunc(Number(args.limit ?? 20)) || 20));
+    const list = await call(`/api/v1/library?engine=compute&limit=${limit}&usage=0`, { workspace: args.workspace_id, signal: extra?.signal });
+    if (list.isError) return list;
+    const items = ((list.structuredContent as { items?: { compute?: unknown }[] } | undefined)?.items ?? []);
+    return ok({ assets: items.flatMap(i => i.compute ? [i.compute] : []) });
+  });
 
   register(COMPUTE_TOOL_NAMES[4], {
     title: 'Compute · colour, material or polygon variant',
@@ -172,7 +235,7 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
 
   register(COMPUTE_TOOL_NAMES[6], {
     title: 'Compute · validate or regenerate text images',
-    description: 'A text generation of GripForge Compute stops after its four reference images (gripforge_compute_job shows validation.etat en_attente and images[{stage, url}]). Show them to the user, then: image=1..4 to turn that image into 3D (stage=quote returns the 3D price; stage=generate with quote_token and confirm=true launches the 3D job, billed when finished), or regenerate=true (optionally with a new prompt) for four new images, billed again on their own, or abandon=true (only the images were billed).',
+    description: 'A text generation of GripForge Compute stops after its four reference images (gripforge_generation_read shows validation.etat en_attente and images[{stage, url}]). Show them to the user, then: image=1..4 to turn that image into 3D (stage=quote returns the 3D price; stage=generate with quote_token and confirm=true launches the 3D job, billed when finished), or regenerate=true (optionally with a new prompt) for four new images, billed again on their own, or abandon=true (only the images were billed).',
     inputSchema: {
       job_id: schema.string().min(1).max(200).describe('The text generation job waiting for validation'),
       image: schema.number().int().min(1).max(4).optional(), regenerate: schema.boolean().optional(), prompt: schema.string().min(3).max(500).optional().describe('regenerate: new text (default: the same)'),
@@ -183,23 +246,24 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async (args, extra) => {
+    // The generic job actions (POST /api/v1/generation-jobs/:id): validate, regenerate or dismiss, step quote then generate.
     const id = encodeURIComponent(String(args.job_id));
-    if (args.abandon === true) return call(`/api/v1/compute-assets/jobs/${id}/dismiss`, { method: 'POST', body: {}, workspace: args.workspace_id, signal: extra?.signal });
+    if (args.abandon === true) return call(`/api/v1/generation-jobs/${id}`, { method: 'POST', body: { action: 'dismiss' }, workspace: args.workspace_id, signal: extra?.signal });
     const what = typeof args.image === 'number' ? 'validate' : args.regenerate === true ? 'regenerate' : null;
     if (!what) return fail('Give image (1–4), regenerate=true or abandon=true.');
     const stage = args.stage === 'generate' ? 'generate' : 'quote';
     if (stage === 'generate' && (args.confirm !== true || typeof args.quote_token !== 'string')) return fail('stage=generate needs quote_token and confirm=true after the user accepted the price.');
-    const body = { action: stage, ...(what === 'validate' ? { stage: `image_${args.image}` } : typeof args.prompt === 'string' ? { prompt: args.prompt } : {}),
+    const body = { action: what, step: stage, ...(what === 'validate' ? { stage: `image_${args.image}` } : typeof args.prompt === 'string' ? { prompt: args.prompt } : {}),
       ...(stage === 'generate' ? { accepted_quote: args.quote_token, idempotency_key: typeof args.idempotency_key === 'string' ? args.idempotency_key : `compute:${what}:mcp:${randomUUID()}` } : {}) };
-    const result = await call(`/api/v1/compute-assets/jobs/${id}/${what}`, { method: 'POST', body, workspace: args.workspace_id, signal: extra?.signal });
+    const result = await call(`/api/v1/generation-jobs/${id}`, { method: 'POST', body, workspace: args.workspace_id, signal: extra?.signal });
     const data = result.structuredContent as { job?: { id?: string } } | undefined;
     if (data?.job?.id) { (data as Record<string, unknown>).studio_url = studioUrl(data.job.id, args.workspace_id); result.content = [{ type: 'text', text: JSON.stringify(data) }]; }
     return result;
   });
 
   register(COMPUTE_TOOL_NAMES[5], {
-    title: 'Compute · download a GLB',
-    description: options.local ? 'Download one Compute GLB from the private library to a local path (out_path, default ./<asset_id>.glb). Free.' : 'Signed-in download link of one Compute GLB (file_url, needs the API key header) and its edit page. Free.',
+    title: 'Compute · download a GLB (deprecated alias)',
+    description: (options.local ? 'DEPRECATED alias of gripforge_library_pull (same library file). ' : 'DEPRECATED alias of gripforge_library_get (same signed library file). ') + (options.local ? 'Download one Compute GLB from the private library to a local path (out_path, default ./<asset_id>.glb). Free.' : 'Signed-in download link of one Compute GLB (file_url, needs the API key header) and its edit page. Free.'),
     inputSchema: { asset_id: schema.string().min(1).max(160), ...(options.local ? { out_path: schema.string().max(1000).optional() } : {}), workspace_id: workspace },
     annotations: { readOnlyHint: !options.local, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async (args, extra) => {
