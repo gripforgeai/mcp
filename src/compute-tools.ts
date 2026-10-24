@@ -7,7 +7,7 @@ import type { VfxProjectRegister } from './vfx-project-tools.js';
  * Every call goes to GripForge (quote, then confirmed launch, one debit); GripForge talks to the Compute router.
  * Each asset comes back with its direct edit page (`edit_url`) that the client can open.
  */
-export const COMPUTE_TOOL_NAMES = ['gripforge_compute_status', 'gripforge_compute_generate', 'gripforge_compute_job', 'gripforge_compute_assets', 'gripforge_compute_variant', 'gripforge_compute_download'] as const;
+export const COMPUTE_TOOL_NAMES = ['gripforge_compute_status', 'gripforge_compute_generate', 'gripforge_compute_job', 'gripforge_compute_assets', 'gripforge_compute_variant', 'gripforge_compute_download', 'gripforge_compute_validate'] as const;
 const BUDGETS = ['petit_objet', 'en_main', 'outil_detaille', 'mobilier_simple', 'gros_mobilier'] as const;
 type Options = { apiUrl: string; getApiKey: () => string | null | undefined; local?: boolean; readFile?: (path: string) => Promise<Buffer>; writeFile?: (path: string, bytes: Buffer) => Promise<string> };
 type Result = { isError?: boolean; structuredContent?: Record<string, unknown>; content: { type: 'text'; text: string }[] };
@@ -69,7 +69,7 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
 
   register(COMPUTE_TOOL_NAMES[1], {
     title: 'Compute · generate 3D assets',
-    description: 'ON DEMAND ONLY: use when the user asks for GripForge Compute; the default 3D generator stays gripforge_generate_prop without provider. Make textured 3D prop/furniture assets with GripForge Compute from images or text descriptions: one asset (name + prompt or image) or several at once (items, up to 5; each item is one asset, from its prompt or its image). Two steps: stage=quote (free) returns each quote.token and the total price; show it to the user, then stage=generate with the tokens (quote_token, or quote_tokens in item order) and confirm=true launches one durable job per asset, each debited once after success with its own idempotency key. Weapons, vehicles and characters are refused before any charge (use the default generator). Returns one job per asset with studio_url; poll gripforge_compute_job (several job_ids at once) for the GLBs and their edit_url.',
+    description: 'ON DEMAND ONLY: use when the user asks for GripForge Compute; the default 3D generator stays gripforge_generate_prop without provider. Make textured 3D prop/furniture assets with GripForge Compute from images or text descriptions: one asset (name + prompt or image) or several at once (items, up to 5; each item is one asset, from its prompt or its image). Two steps: stage=quote (free) returns each quote.token and the total price; show it to the user, then stage=generate with the tokens (quote_token, or quote_tokens in item order) and confirm=true launches one durable job per asset, each debited once after success with its own idempotency key. Text assets stop after four reference images (billed on their own): show them to the user, then gripforge_compute_validate with the chosen image (the 3D is quoted then, and billed when finished), or regenerate; auto_pick=true (only if the user asked) takes the first image and bills images + 3D once. Weapons, vehicles and characters are refused before any charge (use the default generator). Returns one job per asset with studio_url; poll gripforge_compute_job (several job_ids at once) for the GLBs and their edit_url.',
     inputSchema: {
       stage: schema.enum(['quote', 'generate']).describe('quote first (free), then generate'),
       source: schema.enum(['image', 'text']).optional().describe('Single asset: default image. Items: inferred from each item (prompt → text, image → image)'),
@@ -82,6 +82,7 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
       quality: schema.enum(['standard', 'detail']).optional().describe('Texture quality. Default standard'),
       triangles: schema.number().int().min(500).max(200000).optional().describe('Image assets only: exact triangle count of the « near » GLB (the « scene » one gets half). Default: from object_type. For a finished asset (also from text), use gripforge_compute_variant kind=budget'),
       options: schema.array(schema.enum(['photo', 'matieres', 'relief'])).max(3).optional().describe('Image assets: photo (keep visible details), matieres (refine materials), relief (surface detail). Default all three'),
+      auto_pick: schema.boolean().optional().describe('Text assets: true = take the first image without asking (only when the user explicitly wants it). Default: stop and wait for gripforge_compute_validate'),
       quote_token: schema.string().length(64).optional().describe('stage=generate, single asset: quote.token from the quote with the SAME inputs'),
       quote_tokens: schema.array(schema.string().length(64)).max(5).optional().describe('stage=generate with items: the quote tokens in item order'),
       confirm: schema.boolean().optional().describe('stage=generate: true once the user accepted the quoted price'),
@@ -103,7 +104,7 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
       else if (typeof item.prompt !== 'string') return fail(`${String(item.name)}: a text asset needs prompt.`);
       const body = {
         action: args.stage, source: text ? 'text' : 'image', name: item.name, budget: args.object_type ?? 'mobilier_simple', quality: args.quality ?? 'standard',
-        options: text ? [] : args.options ?? ['photo', 'matieres', 'relief'], ...(text ? { prompt: item.prompt } : { image, ...(typeof args.triangles === 'number' ? { triangles: args.triangles } : {}) }),
+        options: text ? [] : args.options ?? ['photo', 'matieres', 'relief'], ...(text ? { prompt: item.prompt, ...(args.auto_pick === true ? { auto_pick: true } : {}) } : { image, ...(typeof args.triangles === 'number' ? { triangles: args.triangles } : {}) }),
         ...(args.stage === 'generate' ? { accepted_quote: tokens[index], idempotency_key: list.length > 1 ? `${batchKey.slice(0, 150)}:${index}` : batchKey } : {}),
       };
       const result = await call('/api/v1/compute-assets', { method: 'POST', body, workspace: args.workspace_id, signal: extra?.signal });
@@ -124,7 +125,7 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
 
   register(COMPUTE_TOOL_NAMES[2], {
     title: 'Compute · follow jobs',
-    description: 'Read GripForge Compute jobs (generations or variants): job_id, or job_ids for several at once. Status (queued, running, succeeded, failed), current stage, stage counts and router queue (machine starting, position). On success, result.assets lists the GLBs (scene, detail) with asset_id, triangles, edit_url (open it to edit in the studio) and file_url. Free.',
+    description: 'Read GripForge Compute jobs (generations or variants): job_id, or job_ids for several at once. Status (queued, running, succeeded, failed), current stage and stage counts. While the router waits, `attente` = {raison: demarrage_machine | aucune_machine | file | machine_occupee, position, depuis, estimation_s} (a machine start takes about 10 min the first time). On success, result.assets lists the GLBs (scene, detail) with asset_id, triangles, edit_url (open it to edit in the studio) and file_url. Free.',
     inputSchema: { job_id: schema.string().min(1).max(200).optional(), job_ids: schema.array(schema.string().min(1).max(200)).min(1).max(20).optional(), workspace_id: workspace },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async (args, extra) => {
@@ -151,11 +152,11 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
 
   register(COMPUTE_TOOL_NAMES[4], {
     title: 'Compute · colour, material or polygon variant',
-    description: 'New version of a Compute asset, on demand: kind=couleur (value #RRGGBB, recolours the main material), kind=matiere (value: a few words, e.g. "green velvet"; the texture is redone) or kind=budget (change the polygon count: value bas | moyen | haut relative to the current one, or an exact « near » triangle count 500–200000; the « scene » GLB gets half; refused as coming soon until the router supports it). stage=quote (free) returns quote.token; after the user accepts, stage=generate with quote_token and confirm=true launches one billed job. Poll gripforge_compute_job; new assets come back with edit_url. Painted-area edits and full retexture are not available yet.',
+    description: 'New version of a Compute asset, on demand: kind=couleur (value #RRGGBB, recolours the main material), kind=matiere (value: a few words, e.g. "green velvet"; the texture is redone) kind=retexture (value: a style for the whole asset, same mesh and UVs, e.g. "painted blue wood, worn") or kind=budget (change the polygon count: value bas | moyen | haut relative to the current one, or an exact « near » triangle count 500–200000; the « scene » GLB gets half; refused as coming soon until the router supports it). stage=quote (free) returns quote.token; after the user accepts, stage=generate with quote_token and confirm=true launches one billed job. Poll gripforge_compute_job; new assets come back with edit_url. Painted-area edits need the studio brush: give the user the edit_url.',
     inputSchema: {
       asset_id: schema.string().min(1).max(160).describe('Compute asset (scene or detail) from gripforge_compute_assets or a job result'),
-      kind: schema.enum(['couleur', 'matiere', 'budget']),
-      value: schema.string().min(1).max(80).describe('couleur: #RRGGBB; matiere: short description; budget: bas | moyen | haut or a triangle count'),
+      kind: schema.enum(['couleur', 'matiere', 'budget', 'retexture']),
+      value: schema.string().min(1).max(300).describe('couleur: #RRGGBB; matiere: short description; budget: bas | moyen | haut or a triangle count; retexture: style for the whole asset'),
       stage: schema.enum(['quote', 'generate']),
       quote_token: schema.string().length(64).optional(),
       confirm: schema.boolean().optional(),
@@ -167,6 +168,33 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
     if (args.stage === 'generate' && (args.confirm !== true || typeof args.quote_token !== 'string')) return fail('stage=generate needs quote_token and confirm=true after the user accepted the price.');
     const body = { action: args.stage, kind: args.kind, value: args.value, ...(args.stage === 'generate' ? { accepted_quote: args.quote_token, idempotency_key: typeof args.idempotency_key === 'string' ? args.idempotency_key : `compute-variant:mcp:${randomUUID()}` } : {}) };
     return call(`/api/v1/compute-assets/${encodeURIComponent(String(args.asset_id))}`, { method: 'POST', body, workspace: args.workspace_id, signal: extra?.signal });
+  });
+
+  register(COMPUTE_TOOL_NAMES[6], {
+    title: 'Compute · validate or regenerate text images',
+    description: 'A text generation of GripForge Compute stops after its four reference images (gripforge_compute_job shows validation.etat en_attente and images[{stage, url}]). Show them to the user, then: image=1..4 to turn that image into 3D (stage=quote returns the 3D price; stage=generate with quote_token and confirm=true launches the 3D job, billed when finished), or regenerate=true (optionally with a new prompt) for four new images, billed again on their own, or abandon=true (only the images were billed).',
+    inputSchema: {
+      job_id: schema.string().min(1).max(200).describe('The text generation job waiting for validation'),
+      image: schema.number().int().min(1).max(4).optional(), regenerate: schema.boolean().optional(), prompt: schema.string().min(3).max(500).optional().describe('regenerate: new text (default: the same)'),
+      abandon: schema.boolean().optional(),
+      stage: schema.enum(['quote', 'generate']).optional().describe('image / regenerate: quote first, then generate'),
+      quote_token: schema.string().length(64).optional(), confirm: schema.boolean().optional(),
+      idempotency_key: schema.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional(), workspace_id: workspace,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async (args, extra) => {
+    const id = encodeURIComponent(String(args.job_id));
+    if (args.abandon === true) return call(`/api/v1/compute-assets/jobs/${id}/dismiss`, { method: 'POST', body: {}, workspace: args.workspace_id, signal: extra?.signal });
+    const what = typeof args.image === 'number' ? 'validate' : args.regenerate === true ? 'regenerate' : null;
+    if (!what) return fail('Give image (1–4), regenerate=true or abandon=true.');
+    const stage = args.stage === 'generate' ? 'generate' : 'quote';
+    if (stage === 'generate' && (args.confirm !== true || typeof args.quote_token !== 'string')) return fail('stage=generate needs quote_token and confirm=true after the user accepted the price.');
+    const body = { action: stage, ...(what === 'validate' ? { stage: `image_${args.image}` } : typeof args.prompt === 'string' ? { prompt: args.prompt } : {}),
+      ...(stage === 'generate' ? { accepted_quote: args.quote_token, idempotency_key: typeof args.idempotency_key === 'string' ? args.idempotency_key : `compute:${what}:mcp:${randomUUID()}` } : {}) };
+    const result = await call(`/api/v1/compute-assets/jobs/${id}/${what}`, { method: 'POST', body, workspace: args.workspace_id, signal: extra?.signal });
+    const data = result.structuredContent as { job?: { id?: string } } | undefined;
+    if (data?.job?.id) { (data as Record<string, unknown>).studio_url = studioUrl(data.job.id, args.workspace_id); result.content = [{ type: 'text', text: JSON.stringify(data) }]; }
+    return result;
   });
 
   register(COMPUTE_TOOL_NAMES[5], {
