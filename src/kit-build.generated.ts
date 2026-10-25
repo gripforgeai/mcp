@@ -374,8 +374,8 @@ export function buildSummary(r: BuildKitReport): string {
   for (const b of r.built) lines.push(`  ${b.mode.padEnd(8)} ${b.wasm}`, `           sha256 ${b.sha256}  (${b.bytes} bytes)`, `           manifest ${b.manifest}`);
   for (const w of r.warnings) lines.push(`  warning: ${w}`);
   lines.push('', 'Declare it in a game (its lock freezes the version, the sha256 and the trust):',
-    `  gripforge kit add <game> --kit ${r.out}                    isolated: the kit keeps a memory of its own (the default)`,
-    `  gripforge kit add <game> --kit ${r.out} --trust common     in the common memory: faster, and it can corrupt the game — only a kit you trust`,
+    `  gripforge kit add <game> --kit ${r.out}                    in the common memory (the default): faster, and it can corrupt the game`,
+    `  gripforge kit add <game> --kit ${r.out} --trust isolated   a memory of its own: it cannot corrupt the game — for a kit you do not trust`,
     `Check a build against the core of a game: gripforge kit verify --kit ${r.out} --modules <folder of kit modules>`);
   return lines.join('\n');
 }

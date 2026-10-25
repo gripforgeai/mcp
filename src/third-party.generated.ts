@@ -4,8 +4,8 @@
  * alone into one `.wasm` (a kit logic module, docs/kit-modules.md). A game plays one only when it **declares** it:
  *
  *   project.thirdPartyKits[]   { id, version, source, sha256, bytes, trust, manifest }   where the module comes from
- *                              `trust`: "isolated" (the default: the kit keeps a memory of its own) or "common"
- *                              (the game lets it into the memory of the core and of the other kits)
+ *                              `trust`: "common" (the default: the game lets it into the memory of the core and of the
+ *                              other kits) or "isolated" (the kit keeps a memory of its own, chosen explicitly)
  *   project.installed[]        { id, version, enabled, config }                    its config, as for any kit
  *   lock.order                 its place in the mount order
  *   lock.kits[id]              { version, enabled }
@@ -72,8 +72,8 @@ export interface ThirdPartyKitDecl {
   sha256: string;
   bytes: number;
   /**
-   * Whether the game trusts this kit with the common memory. `"isolated"` (or absent): no — the kit keeps a memory
-   * of its own. `"common"`: yes — it is loaded as a kit of GripForge is and can corrupt the others. Decided by the
+   * Whether the game trusts this kit with the common memory. `"common"` (or absent): yes — it is loaded as a kit of GripForge is and can corrupt the others.
+   * `"isolated"`: no — the kit keeps a memory of its own, chosen explicitly by the project. Decided by the
    * maker of the game, kit by kit; the binary declared must be the build of that mode.
    */
   trust?: KitMode;
@@ -83,8 +83,8 @@ export interface ThirdPartyKitDecl {
 /** `lock.thirdParty[id]`: the version, the fingerprint and the trust the lock froze. */
 export interface ThirdPartyKitLock { version: string; sha256: string; bytes: number; trust?: KitMode }
 
-/** The mode a declaration asks: `trust`, isolated when it says nothing. */
-export const kitTrust = (decl: { trust?: unknown } | null | undefined): KitMode => (decl?.trust === 'common' ? 'common' : 'isolated');
+/** The mode a declaration asks: `trust`, common when it says nothing. */
+export const kitTrust = (decl: { trust?: unknown } | null | undefined): KitMode => (decl?.trust === 'isolated' ? 'isolated' : 'common');
 
 /** The part of a game file this module reads and writes (a project bundle: `{ project, lock }`). */
 export interface ThirdPartyGame {
@@ -423,7 +423,7 @@ export function declarationIssues(decl: unknown): string[] {
   else if (/^[a-z][a-z0-9+.-]*:/i.test(d.source) && !/^https?:\/\//i.test(d.source)) issues.push(`${who}: "source" ${d.source} — only a relative path or an http(s) URL`);
   if (typeof d.sha256 !== 'string' || !SHA256.test(d.sha256)) issues.push(`${who}: "sha256" must be the 64 hexadecimal digits of the module's SHA-256`);
   if (!Number.isSafeInteger(d.bytes) || (d.bytes ?? 0) <= 0) issues.push(`${who}: "bytes" must be the size of the module`);
-  if (d.trust !== undefined && !(KIT_MODES as readonly unknown[]).includes(d.trust)) issues.push(`${who}: "trust" must be "isolated" (the default: a memory of its own) or "common" (the game lets it into the common memory) — got ${JSON.stringify(d.trust)}`);
+  if (d.trust !== undefined && !(KIT_MODES as readonly unknown[]).includes(d.trust)) issues.push(`${who}: "trust" must be "common" (the default: the game lets it into the common memory) or "isolated" (a memory of its own) — got ${JSON.stringify(d.trust)}`);
   const m = kitManifestIssues(d.manifest);
   if (m.length) issues.push(...m.map((x) => `${who}: ${x}`));
   else {

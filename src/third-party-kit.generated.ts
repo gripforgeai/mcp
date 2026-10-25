@@ -78,10 +78,10 @@ function installModule(files: GameFiles, decl: ThirdPartyKitDecl, bytes: Uint8Ar
 export interface AddKitOptions { game: string; wasm?: string; manifest?: string; kit?: string; trust?: KitMode; config?: Record<string, unknown>; modules?: string; check?: boolean; cwd?: string; signal?: AbortSignal }
 export interface AddKitReport { game: string; id: string; version: string; trust: KitMode; source: string; sha256: string; bytes: number; replaced: boolean; checked: boolean; module: string | null; modules: string | null; warnings: string[]; order: string[] }
 
-/** `--trust`: `isolated` (the default) or `common`. */
+/** `--trust`: `common` (the default) or `isolated`. */
 export function trustOf(value: unknown): KitMode | undefined {
   if (value === undefined || value === null || value === false || value === '') return undefined;
-  if (!(KIT_MODES as readonly unknown[]).includes(value)) throw Error(`--trust must be "isolated" (the default: the kit keeps a memory of its own) or "common" (you let it into the memory of the game: it can corrupt the other kits) — got ${JSON.stringify(value)}`);
+  if (!(KIT_MODES as readonly unknown[]).includes(value)) throw Error(`--trust must be "common" (the default: the kit enters the memory of the game) or "isolated" (a memory of its own) — got ${JSON.stringify(value)}`);
   return value as KitMode;
 }
 
@@ -108,16 +108,16 @@ export function pickBuild(kit: string, trust: KitMode, cwd: string): { wasm: str
  */
 export async function addKit(options: AddKitOptions): Promise<AddKitReport> {
   const cwd = options.cwd ?? process.cwd(), files = openGame(isAbsolute(options.game) ? options.game : resolve(cwd, options.game), options.modules ? resolve(cwd, options.modules) : undefined);
-  const picked = options.kit ? pickBuild(options.kit, options.trust ?? 'isolated', cwd) : null;
+  const picked = options.kit ? pickBuild(options.kit, options.trust ?? 'common', cwd) : null;
   const wasmSource = picked?.wasm ?? options.wasm, manifestSource = picked?.manifest ?? options.manifest;
   if (!wasmSource) throw Error('the kit is needed: --kit <output folder of gripforge kit build>, or --wasm <.wasm file or http(s) URL> with --manifest <its .kit.json>.');
   if (!manifestSource) throw Error('--manifest is needed: the .kit.json written beside the module by gripforge kit build (a file or an http(s) URL).');
   const bytes = await readSource(wasmSource, cwd, options.signal);
   let manifest: ThirdPartyKitManifest;
   try { manifest = JSON.parse(new TextDecoder().decode(await readSource(manifestSource, cwd, options.signal))) as ThirdPartyKitManifest; } catch (error) { throw Error(`${manifestSource}: ${(error as Error).message}`); }
-  // The trust the maker of the game gives this kit: asked here, else kept from the previous declaration, else none (isolated).
+  // The trust the maker of the game gives this kit: asked here, else kept from the previous declaration, else none (common).
   const before = thirdPartyKits(files.game.project).find((k) => k.id === manifest?.id);
-  const trust: KitMode = options.trust ?? (before ? kitTrust(before) : 'isolated');
+  const trust: KitMode = options.trust ?? (before ? kitTrust(before) : 'common');
   const reserved = (id: string) => !!files.modules?.kits?.[id] && !files.modules.kits[id]!.thirdParty;
   const check = checkThirdPartyKit({ manifest, wasm: bytes, modules: files.modules, reserved, trust });
   if (check.issues.length) throw Error(check.issues.join('\n'));
@@ -140,7 +140,7 @@ export async function addKit(options: AddKitOptions): Promise<AddKitReport> {
     saveGame(files, game);
   }
   if (!files.modules) check.warnings.push('this game has no kit modules beside it (no runtime-rust/kit-modules/ or kit-modules/ with a kit-modules.json): the kit was checked against its manifest only. Pass --modules <folder of kit modules> to check it against a core now; the web export checks it in any case');
-  if (trust === 'common') check.warnings.push(`${decl.id} is trusted with the common memory: it runs in the memory of the core and of the other kits and is NOT isolated — a fault in it can corrupt the game. Declare its isolated build (no --trust) for a kit you do not trust.`);
+  if (trust === 'common') check.warnings.push(`${decl.id} is placed in the common memory (the default): it runs in the memory of the core and of the other kits and is NOT isolated — a fault in it can corrupt the game. Declare its isolated build (--trust isolated) for a kit you do not trust.`);
   return { game: files.file, id: decl.id, version: decl.version, trust, source, sha256: digest, bytes: bytes.length, replaced, checked: !!options.check, module, modules: files.modulesDir, warnings: check.warnings, order: game.lock.order ?? [] };
 }
 
@@ -189,9 +189,9 @@ export interface VerifyBuildReport { ok: boolean; id: string | null; version: st
  */
 export async function verifyBuild(options: { wasm?: string; manifest?: string; kit?: string; trust?: KitMode; modules?: string; cwd?: string; signal?: AbortSignal }): Promise<VerifyBuildReport> {
   const cwd = options.cwd ?? process.cwd();
-  const picked = options.kit ? pickBuild(options.kit, options.trust ?? 'isolated', cwd) : null;
+  const picked = options.kit ? pickBuild(options.kit, options.trust ?? 'common', cwd) : null;
   const wasmSource = picked?.wasm ?? options.wasm, manifestSource = picked?.manifest ?? options.manifest;
-  if (!wasmSource || !manifestSource) throw Error('a build is needed: --kit <output folder of gripforge kit build> [--trust common], or --wasm <file|url> with --manifest <its .kit.json>.');
+  if (!wasmSource || !manifestSource) throw Error('a build is needed: --kit <output folder of gripforge kit build> [--trust isolated], or --wasm <file|url> with --manifest <its .kit.json>.');
   const bytes = await readSource(wasmSource, cwd, options.signal);
   let manifest: ThirdPartyKitManifest;
   try { manifest = JSON.parse(new TextDecoder().decode(await readSource(manifestSource, cwd, options.signal))) as ThirdPartyKitManifest; } catch (error) { throw Error(`${manifestSource}: ${(error as Error).message}`); }
@@ -255,10 +255,10 @@ export const KIT_USAGE = `Usage:
   gripforge kit build <kit folder> [--out <dir>] [--mode isolated|common|both] [--install] [--sdk <dir>] [--target-dir <dir>] [--jobs <n>] [--json]
                                                                                compile a kit of your own on the build base (both builds by default)
   gripforge kit socle [--install] [--json]                                     the build base: toolchain, options, contract, structures; is it ready here
-  gripforge kit add <game> --kit <build folder> [--trust common] [--config '<json>'] [--modules <dir>] [--check] [--json]
-  gripforge kit add <game> --wasm <file|url> --manifest <.kit.json|url> [--trust common] …
-                                                                               --trust common: the kit enters the memory of the game (not isolated)
-  gripforge kit verify --kit <build folder> [--trust common] --modules <dir>   one build against a core: contract and structures (expected / found)
+  gripforge kit add <game> --kit <build folder> [--trust isolated] [--config '<json>'] [--modules <dir>] [--check] [--json]
+  gripforge kit add <game> --wasm <file|url> --manifest <.kit.json|url> [--trust isolated] …
+                                                                               --trust isolated: the kit keeps a memory of its own (default: the common memory)
+  gripforge kit verify --kit <build folder> [--trust isolated] --modules <dir>   one build against a core: contract and structures (expected / found)
   gripforge kit verify <game> [kit-id] [--modules <dir>] [--json]              exit code 2 when a kit does not verify
   (a refused command exits with 1 and writes nothing)
   gripforge kit list <game> [--json]
