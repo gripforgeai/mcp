@@ -216,31 +216,38 @@ export async function lodGame(transport: LodTransport, project: string, o: LodGa
     for (const c of copies.filter((c) => c.ready)) { entry.copies.push({ profile: c.profile, textures: c.textures, key: c.key, status: 'current', note: 'already on the server' }); report.current++; }
     if (!missing.length) continue;
     if (o.dryRun) { for (const c of missing) entry.copies.push({ profile: c.profile, textures: c.textures, key: c.key, status: 'missing' }); continue; }
-    const dir = join(work, model.played);
-    await mkdir(dir, { recursive: true });
-    const source = join(dir, 'source.glb');
-    log(`${model.name || model.played}: downloading ${model.played}`);
-    await writeFile(source, await transport.bytes(`/api/v1/library/${model.played}/file`));
-    const extraId = missing.find((c) => c.extraId)?.extraId ?? null;
-    let extra: string | undefined;
-    if (extraId) { extra = join(dir, 'pack.glb'); await writeFile(extra, await transport.bytes(`/api/v1/library/${extraId}/file`)); }
-    const first = missing[0]!;
-    // Per profile the texture format the server makes; the levels are the server's effective ones.
-    const textures: Record<string, string> = {};
-    for (const c of missing) textures[c.profile] = c.textures;
-    const built = await runKit<LodBuilt>(o.kit, { op: 'build', input: source, out: join(dir, model.lov ?? 'global'), extra, kind: model.kind, levels: first.levels, maxTexture: first.maxTexture, profiles: missing.map((c) => c.profile), textures }, o.signal);
-    for (const made of built.copies) {
-      const want = missing.find((c) => c.profile === made.profile);
-      const copy: LodCopy = { ...made };
-      if (made.skipped || !made.file || !want) { report.skipped++; entry.copies.push(copy); continue; }
-      if (made.key !== want.key) { copy.note = `key differs from the server's (${want.key})`; copy.pushed = 'refused'; report.skipped++; entry.copies.push(copy); continue; }
-      if (made.status === 'made') report.made++; else report.current++;
-      if (o.push !== false) {
-        const res = await transport.put(`/api/v1/library/${model.played}/levels?profile=${made.profile}${model.lov ? `&lov=${model.lov}` : ''}`, await readFile(made.file));
-        copy.pushed = res.status === 200 ? 'adopted' : 'refused';
-        if (res.status === 200) report.adopted++; else copy.note = String(res.body.reason ?? res.body.error ?? res.status);
-      } else copy.pushed = 'kept';
-      entry.copies.push(copy);
+    try {
+      const dir = join(work, model.played);
+      await mkdir(dir, { recursive: true });
+      const source = join(dir, 'source.glb');
+      log(`${model.name || model.played}: downloading ${model.played}`);
+      await writeFile(source, await transport.bytes(`/api/v1/library/${model.played}/file`));
+      const extraId = missing.find((c) => c.extraId)?.extraId ?? null;
+      let extra: string | undefined;
+      if (extraId) { extra = join(dir, 'pack.glb'); await writeFile(extra, await transport.bytes(`/api/v1/library/${extraId}/file`)); }
+      const first = missing[0]!;
+      // Per profile the texture format the server makes; the levels are the server's effective ones.
+      const textures: Record<string, string> = {};
+      for (const c of missing) textures[c.profile] = c.textures;
+      const built = await runKit<LodBuilt>(o.kit, { op: 'build', input: source, out: join(dir, model.lov ?? 'global'), extra, kind: model.kind, levels: first.levels, maxTexture: first.maxTexture, profiles: missing.map((c) => c.profile), textures }, o.signal);
+      for (const made of built.copies) {
+        const want = missing.find((c) => c.profile === made.profile);
+        const copy: LodCopy = { ...made };
+        if (made.skipped || !made.file || !want) { report.skipped++; entry.copies.push(copy); continue; }
+        if (made.key !== want.key) { copy.note = `key differs from the server's (${want.key})`; copy.pushed = 'refused'; report.skipped++; entry.copies.push(copy); continue; }
+        if (made.status === 'made') report.made++; else report.current++;
+        if (o.push !== false) {
+          const res = await transport.put(`/api/v1/library/${model.played}/levels?profile=${made.profile}${model.lov ? `&lov=${model.lov}` : ''}`, await readFile(made.file));
+          copy.pushed = res.status === 200 ? 'adopted' : 'refused';
+          if (res.status === 200) report.adopted++; else copy.note = String(res.body.reason ?? res.body.error ?? res.status);
+        } else copy.pushed = 'kept';
+        entry.copies.push(copy);
+      }
+    } catch (e) {
+      const note = e instanceof Error ? e.message : String(e);
+      log(`${model.name || model.played}: left to the service (${note})`);
+      for (const c of missing) entry.copies.push({ profile: c.profile, textures: c.textures, key: c.key, status: 'missing', skipped: note });
+      report.skipped += missing.length;
     }
   }
   return report;
