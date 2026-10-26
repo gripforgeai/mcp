@@ -12,9 +12,9 @@ import { z } from 'zod/v4';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { VfxProjectRegister } from './vfx-project-tools.js';
 import { ensureLodKit, glbsOf, type LodTransport } from './lod-local.generated.js';
-import { COLLISION_SHAPE_NAMES, COLLISION_USAGE_NAMES, collisionFile, collisionGame, type CollisionBuilt } from './collision-local.generated.js';
+import { COLLISION_SHAPE_NAMES, COLLISION_USAGE_NAMES, collisionFile, collisionGame, collisionSlot, type CollisionBuilt } from './collision-local.generated.js';
 
-export const COLLISION_TOOL_NAMES = ['gripforge_collision_build', 'gripforge_collision_check'] as const;
+export const COLLISION_TOOL_NAMES = ['gripforge_collision_build', 'gripforge_collision_check', 'gripforge_collision_passport'] as const;
 
 const ok = (data: object): CallToolResult => ({ structuredContent: data as Record<string, unknown>, content: [{ type: 'text', text: JSON.stringify(data) }] });
 const fail = (error: unknown): CallToolResult => ({ isError: true, content: [{ type: 'text', text: String(error instanceof Error ? error.message : error).slice(0, 2000) }] });
@@ -116,5 +116,23 @@ export function registerCollisionTools(register: VfxProjectRegister, options: { 
       const report = await collisionGame(transport(options, parsed.data.workspace_id), parsed.data.game, { check: true });
       return ok({ project: report.project, ok: report.warnings.length === 0, warnings: report.warnings, models: report.models });
     } catch (error) { return fail(error); }
+  });
+  const passportShape = {
+    game: gkp.describe('The Game Kit project (gkp_…).'),
+    slot: schema.string().min(1).max(96).describe('The slot of the bound model, as gripforge_collision_build with game lists it.'),
+    action: schema.enum(['compare', 'save', 'reset']).describe('compare: make the model with each method (box, compound, convex, convex_decomposition, trimesh) and give parts, score and reason — nothing saved, no AI advice. save: write the game\'s section in its asset_passports (only the keys that differ from the global passport). reset: remove it, the passport rules again.'),
+    section: schema.record(schema.string(), schema.unknown()).optional().describe('kits.collision keys of the game for this model: shape, usage, mobile, maxParts, maxHullPoints, maxTriangles, resolution, small.'),
+    workspace_id: schema.string().max(100).optional(),
+  };
+  register(COLLISION_TOOL_NAMES[2], {
+    title: 'Compare, force or reset the collision method of one model of a game',
+    description: 'The actions of the collision studio (/collision-studio) for one bound model of a game: compare every method with its score and reason, save the method and budgets the game wants in its passport (deviations only, never a copy of the passport), or remove them. Then run gripforge_collision_build with game (and server: true) to make the collision again. 0 credits.',
+    inputSchema: passportShape,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async (args) => {
+    const parsed = schema.object(passportShape).strict().safeParse(args);
+    if (!parsed.success) return fail(parsed.error.message);
+    try { return ok(await collisionSlot(transport(options, parsed.data.workspace_id), parsed.data.game, parsed.data.slot, parsed.data.action, parsed.data.section ?? {})); }
+    catch (error) { return fail(error); }
   });
 }

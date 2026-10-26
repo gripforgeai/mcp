@@ -200,3 +200,39 @@ export function collisionGameLines(r: CollisionGameReport): string[] {
   for (const w of r.warnings) lines.push(`  warning: ${w.message}`);
   return lines;
 }
+
+export interface CollisionSlotMethod { shape: string; method: string | null; parts: number | null; score: number | null; reason: string | null; error?: string }
+export interface CollisionSlotReport {
+  project: string;
+  slot: string;
+  action: 'compare' | 'save' | 'reset';
+  /** compare: the deterministic choice and each method made (no AI advice). */
+  auto?: { method: string; score: number | null; reason: string | null } | null;
+  methods?: CollisionSlotMethod[];
+  /** save / reset: the keys the game now changes over the global passport (null: none; the passport rules). */
+  override?: Record<string, unknown> | null;
+}
+
+/**
+ * One model of a game, from the same endpoints as the collision studio (/collision-studio): `compare` makes it with each method
+ * (box, compound, convex, convex_decomposition, trimesh) under the effective section edited by `section`, nothing saved;
+ * `save` writes the game's say into its `asset_passports` (only the keys that differ from the global passport: no copy);
+ * `reset` removes it. After `save` or `reset`, `gripforge collision <gkp_id> --server` (or locally) makes the collision again.
+ */
+export async function collisionSlot(transport: LodTransport, project: string, slot: string, action: CollisionSlotReport['action'], section: Record<string, unknown> = {}): Promise<CollisionSlotReport> {
+  if (!slot) throw Error('A slot is required (the id of the bound model, as `gripforge collision <gkp_id>` lists it).');
+  const base = `/api/v1/gamekit-projects/${encodeURIComponent(project)}/collision`;
+  if (action === 'compare') {
+    const got = await transport.json<{ auto: CollisionSlotReport['auto']; methods: Array<CollisionSlotMethod & { description?: unknown }> }>(`${base}/compare`, { method: 'POST', body: { slot, section } });
+    return { project, slot, action, auto: got.auto, methods: got.methods.map((m) => ({ shape: m.shape, method: m.method, parts: m.parts, score: m.score, reason: m.reason, ...(m.error ? { error: m.error } : {}) })) };
+  }
+  const got = await transport.json<{ override: Record<string, unknown> | null }>(base, { method: 'PUT', body: { slot, section: action === 'reset' ? null : section } });
+  return { project, slot, action, override: got.override };
+}
+
+export function collisionSlotLines(r: CollisionSlotReport): string[] {
+  if (r.action !== 'compare') return [`Collision · ${r.project} · ${r.slot} — ${r.override ? `game deviations saved: ${JSON.stringify(r.override)}` : 'no game deviation: the passport rules'}. Make it again: gripforge collision ${r.project} --server`];
+  const lines = [`Collision · ${r.project} · ${r.slot} — automatic choice: ${r.auto ? `${r.auto.method} ${score(r.auto.score)} (${r.auto.reason ?? ''})` : 'unknown'}`];
+  for (const m of r.methods ?? []) lines.push(`  ${m.shape.padEnd(22)} ${m.error ? `error: ${m.error}` : `${String(m.parts ?? '-').padEnd(4)} parts ${score(m.score).padEnd(6)} ${m.reason ?? ''}`}`.trimEnd());
+  return lines;
+}
