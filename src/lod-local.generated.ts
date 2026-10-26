@@ -182,8 +182,10 @@ export async function glbsOf(dir: string, depth = 4): Promise<string[]> {
 }
 
 interface PlanCopy { id: string; profile: LodProfile; key: string; textures: string; maxTexture: number; levels: Record<string, unknown> | null; ready: boolean; extraId: string | null }
+interface PlanImage { slot: string; item: string; played: string; name: string; bytes: number; maxTexture: number; ready: boolean }
 interface PlanModel { slot: string; item: string; played: string; name: string; kind: string; bytes: number; lov: string | null; copies: PlanCopy[] }
-export interface LodGameReport { project: string; models: Array<{ slot: string; item: string; name: string; copies: LodCopy[] }>; made: number; current: number; adopted: number; skipped: number }
+export interface LodImageReport { slot: string; item: string; name: string; status: 'made' | 'current' | 'missing' | 'skipped'; bytes?: number; pushed?: 'adopted' | 'refused' | 'kept'; note?: string }
+export interface LodGameReport { project: string; images: LodImageReport[]; models: Array<{ slot: string; item: string; name: string; copies: LodCopy[] }>; made: number; current: number; adopted: number; skipped: number }
 
 export interface LodGameOptions {
   kit: Kit;
@@ -204,9 +206,9 @@ export interface LodGameOptions {
  */
 export async function lodGame(transport: LodTransport, project: string, o: LodGameOptions): Promise<LodGameReport> {
   const log = o.log ?? (() => undefined);
-  const plan = await transport.json<{ project: string; models: PlanModel[] }>(`/api/v1/gamekit-projects/${encodeURIComponent(project)}/lod`);
+  const plan = await transport.json<{ project: string; models: PlanModel[]; images?: PlanImage[] }>(`/api/v1/gamekit-projects/${encodeURIComponent(project)}/lod`);
   const work = resolve(o.out ?? join(process.env.GRIPFORGE_LOD_WORK ?? join(home(), 'cache', 'lod-work'), project));
-  const report: LodGameReport = { project, models: [], made: 0, current: 0, adopted: 0, skipped: 0 };
+  const report: LodGameReport = { project, images: [], models: [], made: 0, current: 0, adopted: 0, skipped: 0 };
   const wanted = o.profiles ?? LOD_PROFILES;
   for (const model of plan.models) {
     const copies = model.copies.filter((c) => wanted.includes(c.profile));
@@ -248,6 +250,32 @@ export async function lodGame(transport: LodTransport, project: string, o: LodGa
       log(`${model.name || model.played}: left to the service (${note})`);
       for (const c of missing) entry.copies.push({ profile: c.profile, textures: c.textures, key: c.key, status: 'missing', skipped: note });
       report.skipped += missing.length;
+    }
+  }
+  // The images (ground, sky, decor): their KTX2 copy with mipmaps for the Bevy player, built with the same function as the service's.
+  if (wanted.includes('bevy')) for (const img of plan.images ?? []) {
+    const entry: LodImageReport = { slot: img.slot, item: img.item, name: img.name, status: img.ready ? 'current' : 'missing' };
+    report.images.push(entry);
+    if (img.ready) { report.current++; continue; }
+    if (o.dryRun) continue;
+    try {
+      const dir = join(work, img.played);
+      await mkdir(dir, { recursive: true });
+      const source = join(dir, 'source.img');
+      log(`${img.name || img.played}: downloading ${img.played}`);
+      await writeFile(source, await transport.bytes(`/api/v1/library/${img.played}/file`));
+      const built = await runKit<{ file?: string; bytes?: number; skipped?: string }>(o.kit, { op: 'image', input: source, out: dir, maxTexture: img.maxTexture }, o.signal);
+      if (!built.file) { entry.status = 'skipped'; entry.note = built.skipped; report.skipped++; continue; }
+      entry.status = 'made'; entry.bytes = built.bytes; report.made++;
+      if (o.push !== false) {
+        const res = await transport.put(`/api/v1/library/${img.played}/levels?profile=bevy`, await readFile(built.file));
+        entry.pushed = res.status === 200 ? 'adopted' : 'refused';
+        if (res.status === 200) report.adopted++; else entry.note = String(res.body.reason ?? res.body.error ?? res.status);
+      } else entry.pushed = 'kept';
+    } catch (e) {
+      entry.status = 'skipped'; entry.note = e instanceof Error ? e.message : String(e);
+      log(`${img.name || img.played}: left to the service (${entry.note})`);
+      report.skipped++;
     }
   }
   return report;
