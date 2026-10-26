@@ -34,8 +34,10 @@ export interface LodTransport {
 export interface KitOptions {
   /** A folder holding `lod-kit.mjs` (a kit unpacked, or tools/lod-kit output); else GRIPFORGE_LOD_KIT; else the published release, cached. */
   kit?: string;
-  /** The simplifier binary `gripforge-lod`; else GRIPFORGE_LOD_BIN; else the one of the release for this platform. */
+  /** The simplifier binary `gripforge-lod`; else GRIPFORGE_LOD_BIN; else the one of the release for this platform. With `tool: 'collision'`: the binary `gripforge-collision` (GRIPFORGE_COLLISION_BIN). */
   bin?: string;
+  /** Which Rust tool the caller needs beside the kit: the simplifier (default) or the collision tool (`gripforge collision`). */
+  tool?: 'lod' | 'collision';
   /** Where the checked release is kept (default: GRIPFORGE_LOD_CACHE, else `<home>/cache/lod-kit`). */
   cache?: string;
   /** Origin the release is downloaded from (default: GRIPFORGE_LOD_KIT_URL, else https://gripforge.ai/cli). */
@@ -43,7 +45,7 @@ export interface KitOptions {
   log?: (line: string) => void;
   fetcher?: typeof fetch;
 }
-export interface Kit { dir: string; bin: string | null; entry: string }
+export interface Kit { dir: string; bin: string | null; entry: string; /** The collision tool `gripforge-collision` (`gripforge collision`), when asked for. */ collisionBin?: string | null }
 
 const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 export const lodPlatform = () => `${process.platform}-${process.arch}`;
@@ -61,11 +63,14 @@ async function download(url: string, want: string, fetcher: typeof fetch): Promi
 /** Finds the kit, fetching and checking the published release once. Throws with what to do when it cannot. */
 export async function ensureLodKit(opts: KitOptions = {}): Promise<Kit> {
   const log = opts.log ?? (() => undefined), fetcher = opts.fetcher ?? fetch;
-  const bin = opts.bin ?? process.env.GRIPFORGE_LOD_BIN ?? null;
+  const collision = opts.tool === 'collision';
+  const bin = (collision ? process.env.GRIPFORGE_LOD_BIN : opts.bin ?? process.env.GRIPFORGE_LOD_BIN) ?? null;
+  const cbin = (collision ? opts.bin ?? process.env.GRIPFORGE_COLLISION_BIN : process.env.GRIPFORGE_COLLISION_BIN) ?? null;
   const own = opts.kit ?? process.env.GRIPFORGE_LOD_KIT;
   const withBin = (dir: string): Kit => {
-    const bundled = join(dir, 'bin', process.platform === 'win32' ? 'gripforge-lod.exe' : 'gripforge-lod');
-    return { dir, entry: join(dir, 'lod-kit.mjs'), bin: bin ?? (existsSync(bundled) ? bundled : null) };
+    const ext = process.platform === 'win32' ? '.exe' : '';
+    const bundled = join(dir, 'bin', `gripforge-lod${ext}`), bundledCollision = join(dir, 'bin', `gripforge-collision${ext}`);
+    return { dir, entry: join(dir, 'lod-kit.mjs'), bin: bin ?? (existsSync(bundled) ? bundled : null), collisionBin: cbin ?? (existsSync(bundledCollision) ? bundledCollision : null) };
   };
   if (own) {
     const dir = resolve(own);
@@ -94,7 +99,20 @@ export async function ensureLodKit(opts: KitOptions = {}): Promise<Kit> {
     await rm(stage, { recursive: true, force: true });
   }
   const kit = withBin(dir);
-  if (!kit.bin) {
+  if (collision && !kit.collisionBin) {
+    const entry = LOD_KIT.collisionBins?.[lodPlatform()];
+    if (!entry) throw Error(`No prebuilt collision tool for ${lodPlatform()} yet (published: ${Object.keys(LOD_KIT.collisionBins ?? {}).join(', ') || 'none'}). Build it from a GripForge checkout — cargo build --release -p gripforge-collision --bin gripforge-collision in native/gripforge-runtime — and pass --bin <path> (or GRIPFORGE_COLLISION_BIN).`);
+    const target = join(dir, 'bin', entry.file.includes('.exe') ? 'gripforge-collision.exe' : 'gripforge-collision');
+    if (!existsSync(target)) {
+      log(`Fetching the collision tool for ${lodPlatform()}…`);
+      const bytes = await download(`${origin}/${entry.file}`, entry.sha256, fetcher);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, bytes);
+      await chmod(target, 0o755);
+    }
+    kit.collisionBin = target;
+  }
+  if (!kit.bin && !collision) {
     const entry = LOD_KIT.bins[lodPlatform()];
     if (!entry) throw Error(`No prebuilt simplifier for ${lodPlatform()} yet (published: ${Object.keys(LOD_KIT.bins).join(', ') || 'none'}). Build it from a GripForge checkout — cargo build --release -p gripforge-lod --bin gripforge-lod in native/gripforge-runtime — and pass --bin <path> (or GRIPFORGE_LOD_BIN).`);
     const target = join(dir, 'bin', entry.file.includes('.exe') ? 'gripforge-lod.exe' : 'gripforge-lod');
@@ -121,7 +139,7 @@ function installDeps(dir: string, log: (line: string) => void) {
 /** Runs one request of the kit (docs: tools/lod-kit/lod-local.mjs). */
 export function runKit<T = Record<string, unknown>>(kit: Kit, request: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   return new Promise((accept, reject) => {
-    const child = spawn(process.execPath, [kit.entry], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...(kit.bin ? { GRIPFORGE_LOD_BIN: kit.bin } : {}) }, signal });
+    const child = spawn(process.execPath, [kit.entry], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...(kit.bin ? { GRIPFORGE_LOD_BIN: kit.bin } : {}), ...(kit.collisionBin ? { GRIPFORGE_COLLISION_BIN: kit.collisionBin } : {}) }, signal });
     const out: Buffer[] = [], err: Buffer[] = [];
     child.stdout.on('data', (c) => out.push(c));
     child.stderr.on('data', (c) => { if (err.length < 64) err.push(c); });
@@ -171,7 +189,7 @@ export async function glbsOf(dir: string, depth = 4): Promise<string[]> {
   const found: string[] = [];
   const walk = async (d: string, level: number) => {
     for (const e of await readdir(d, { withFileTypes: true }).catch(() => [])) {
-      if (e.name === 'gripforge-lod' || e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      if (e.name === 'gripforge-lod' || e.name === 'gripforge-collision' || e.name === 'node_modules' || e.name.startsWith('.')) continue;
       const p = join(d, e.name);
       if (e.isDirectory() && level < depth) await walk(p, level + 1);
       else if (e.isFile() && /\.glb$/i.test(e.name)) found.push(p);
