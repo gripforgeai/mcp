@@ -34,6 +34,8 @@ export const SERVER_TOOL_NAMES = [
   'gripforge_match_get',
   'gripforge_match_create',
   'gripforge_match_stop',
+  'gripforge_room_list',
+  'gripforge_room_close',
 ] as const;
 
 export function registerServerTools(
@@ -410,5 +412,21 @@ export function registerServerTools(
         'POST',
         extra?.signal,
       ),
+  );
+  tool(
+    'gripforge_room_list',
+    'List online rooms',
+    'List the online (multiplayer) rooms of the workspace with their live state. A closed page can leave a room open until its lifetime ends; each workspace holds at most 8 live rooms, so list and close the stale ones when "Room capacity reached" appears.',
+    {},
+    { readOnly: true },
+    (args, extra) => api('network/rooms', args, 'GET', extra?.signal),
+  );
+  tool(
+    'gripforge_room_close',
+    'Close an online room',
+    'Close and delete one online room (frees the room quota). Invitations to it stop working. Mutating.',
+    { room_id: schema.string().min(1).max(100).regex(/^[A-Za-z0-9_-]+$/).describe('Room id from gripforge_room_list') },
+    { readOnly: false, destructive: true },
+    (args, extra) => api(`network/rooms/${encodeURIComponent(String(args.room_id))}`, args, 'DELETE', extra?.signal),
   );
 }
