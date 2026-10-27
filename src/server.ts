@@ -43,6 +43,7 @@ import { registerGameKitLocalTools } from './gamekit-deliver-local.js';
 import { registerMapUnrealLocalTools } from './map-unreal-local.js';
 import { registerThirdPartyKitTools } from './third-party-kit-tools.js';
 import { registerLodTools } from './lod-tools.js';
+import { registerCoreLoopTools } from './core-loop-tools.js';
 import { registerCollisionTools } from './collision-tools.js';
 import { registerMapUnrealImportLocalTools } from './map-unreal-import-local.js';
 import { registerMapUnrealExportLocalTools } from './map-unreal-export-local.js';
@@ -67,6 +68,7 @@ registerMapUnrealLocalTools((server as unknown as { registerTool: VfxProjectRegi
 registerThirdPartyKitTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerLodTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerCollisionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerCoreLoopTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerMapUnrealImportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));
 registerMapUnrealExportLocalTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerReverseTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server));

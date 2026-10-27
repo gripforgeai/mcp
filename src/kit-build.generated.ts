@@ -31,6 +31,7 @@ import {
   checkThirdPartyKit, inspectKitWasm, kitBinaryMode, kitStructsMismatch, parseKitVersion, KIT_MODES, THIRD_PARTY_KIT_SCHEMA,
   type KitMode, type KitStruct, type ThirdPartyKitManifest,
 } from './third-party.generated.js';
+import { checkCoreLoopFiles, type CoreLoopIssue } from './core-loop.generated.js';
 
 /** `socle.json`: the build base (tools/kit-modules/socle.mjs writes it). */
 export interface KitSocle {
@@ -257,9 +258,32 @@ export function withKitContracts(bytes: Uint8Array, lines: string[]): Buffer {
   return Buffer.concat([Buffer.from(bytes.subarray(0, 8)), ...keep.map((k) => Buffer.from(k)), Buffer.from([0, ...leb(body.length)]), body]);
 }
 
+/**
+ * The core loop rule on a kit's code (docs/game-engine-contract.md §12): its logic changes the game only on the tick,
+ * its frame and physics hooks only read, no tick path waits on another thread. The Rust and script sources of the
+ * kit folder (its build and target folders left out).
+ */
+export function kitCoreLoopIssues(dir: string): CoreLoopIssue[] {
+  const files: Array<{ path: string; text: string }> = [];
+  const walk = (at: string, rel: string, depth: number) => {
+    if (depth > 8 || files.length > 2000) return;
+    for (const name of readdirSync(at)) {
+      if (name.startsWith('.') || ['target', 'build', 'node_modules', 'dist'].includes(name)) continue;
+      const path = join(at, name), r = rel ? `${rel}/${name}` : name, info = statSync(path);
+      if (info.isDirectory()) walk(path, r, depth + 1);
+      else if (info.isFile() && info.size < 4 * 1024 * 1024 && /\.(rs|mjs|js|ts)$/.test(name)) files.push({ path: r, text: readFileSync(path, 'utf8') });
+    }
+  };
+  walk(dir, '', 0);
+  return checkCoreLoopFiles(files);
+}
+
 export function buildKit(options: BuildKitOptions): BuildKitReport {
   const cwd = options.cwd ?? process.cwd(), log = options.log ?? ((line: string) => { if (!options.quiet) console.error(line); });
   const src = readKitSource(isAbsolute(options.kit) ? options.kit : resolve(cwd, options.kit));
+  // A kit that breaks the core loop rule is refused before any compilation, each problem with its fix.
+  const loop = kitCoreLoopIssues(src.dir);
+  if (loop.length) throw Error(['The kit breaks the core loop rule (docs: gripforge docs game-engine-contract, §12):', ...loop.map((i) => `${i.code} ${i.message} Fix: ${i.fix}`)].join('\n'));
   const sdk = findKitSdk(options.sdk ? (isAbsolute(options.sdk) ? options.sdk : resolve(cwd, options.sdk)) : undefined), socle = sdk.socle;
   const which = options.mode ?? 'both';
   if (which !== 'both' && !(KIT_MODES as readonly string[]).includes(which)) throw Error(`--mode must be isolated, common or both (got ${String(which)})`);
