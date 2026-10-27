@@ -1,9 +1,9 @@
-import { threeJoystickFiles } from './threejs.js';
+import { THREEJS_REMOVED_MESSAGE, isRemovedThreeTarget } from '../removed-targets.js';
 import { godotJoystickFiles } from './godot.js';
 import { unityJoystickFiles } from './unity.js';
 import { unrealJoystickFiles } from './unreal.js';
 
-export type JoystickTarget = 'threejs' | 'godot' | 'unity' | 'unreal';
+export type JoystickTarget = 'godot' | 'unity' | 'unreal';
 export interface JoystickConfig { layout: 'move' | 'dual'; deadzone: number; radius: number; accent: string }
 export interface JoystickFile { path: string; content: string }
 export const joystickDefaults: JoystickConfig = { layout: 'dual', deadzone: .15, radius: 72, accent: '#ff681f' };
@@ -19,11 +19,12 @@ export function joystickAxis(x: number, y: number, deadzone = .15): { x: number;
 
 export function createJoystickKit(target: JoystickTarget | 'all', options: Partial<JoystickConfig> = {}) {
   const config={...joystickDefaults,...options};
-  if (!['threejs','godot','unity','unreal','all'].includes(target)) throw Error('Unknown joystick target.');
+  if (isRemovedThreeTarget(target)) throw Error(THREEJS_REMOVED_MESSAGE);
+  if (!['godot','unity','unreal','all'].includes(target)) throw Error('Unknown joystick target.');
   if (!['move','dual'].includes(config.layout) || !Number.isFinite(config.deadzone) || config.deadzone<0 || config.deadzone>.5 ||
       !Number.isFinite(config.radius) || config.radius<32 || config.radius>160 || !/^#[\da-f]{6}$/i.test(config.accent)) throw Error('Invalid joystick configuration.');
-  const targets: JoystickTarget[]=target==='all'?['threejs','godot','unity','unreal']:[target];
-  const factories={threejs:threeJoystickFiles,godot:godotJoystickFiles,unity:unityJoystickFiles,unreal:unrealJoystickFiles};
+  const targets: JoystickTarget[]=target==='all'?['godot','unity','unreal']:[target];
+  const factories={godot:godotJoystickFiles,unity:unityJoystickFiles,unreal:unrealJoystickFiles};
   return {
     schema:'gripforge.joystick-kit.v1', module:'input.joystick', version:'1.0.0', credits:0, config,
     conventions:{axes:'x right, y up/forward',range:'unit disc; diagonals never exceed magnitude 1',deadzone:'radial, rescaled continuously outside the dead zone',holding:'value persists every frame until release/cancel/focus loss',ownership:'one pointer per stick; movement and look can be held simultaneously',physics:'Feeds the existing pawn/controller; examples are optional.'},

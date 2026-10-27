@@ -12,6 +12,7 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { targetEnum } from './removed-targets.js';
 import { propGripSchema } from './attach-options.js';
 import { registerVfxProjectTools, type VfxProjectRegister } from './vfx-project-tools.js';
 import { registerSceneTools } from './scene-tools.js';
@@ -99,7 +100,7 @@ server.tool(
   'gripforge_attach',
   'Attach a prop (sword, shield, gun, staff/scythe…) onto a rigged character. ' +
     'Finds the hand bone across naming schemes, scales to body height, seats the grip, ' +
-    'and returns a bind + ready-to-paste Three.js / Unity / Godot snippets. ' +
+    'and returns a bind + ready-to-paste Unity / Godot snippets. ' +
     'Pass local paths or Library ids (character_id / prop_id). After attach the bind ' +
     '(+ armed GLB when export_glb) is saved in Library — not a second credit. ' +
     'Exact placement: add an Empty/locator named "grip" on the handle inside the weapon file — ' +
@@ -252,7 +253,6 @@ server.tool(
       const dir = resolve(out_dir);
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, 'bind.json'), exportsObj.json ?? JSON.stringify(data.bind, null, 2));
-      if (exportsObj.three) await writeFile(join(dir, 'three.js.txt'), exportsObj.three);
       if (exportsObj.unity) await writeFile(join(dir, 'unity.cs.txt'), exportsObj.unity);
       if (exportsObj.godot) await writeFile(join(dir, 'godot.gd.txt'), exportsObj.godot);
       const glb = data.glb as { filename?: string; base64?: string; notes?: string[] } | undefined;
@@ -818,11 +818,7 @@ server.tool(
       const json = typeof data.json === 'string' ? data.json : JSON.stringify(data, null, 2);
       await writeFile(join(dir, 'boss.json'), json);
       wrote.push(join(dir, 'boss.json'));
-      const engines = data.engines as { three?: string; godot?: string; unity?: string; unreal?: string } | undefined;
-      if (engines?.three) {
-        await writeFile(join(dir, 'three.js.txt'), engines.three);
-        wrote.push(join(dir, 'three.js.txt'));
-      }
+      const engines = data.engines as { godot?: string; unity?: string; unreal?: string } | undefined;
       if (engines?.godot) {
         await writeFile(join(dir, 'godot.gd.txt'), engines.godot);
         wrote.push(join(dir, 'godot.gd.txt'));
@@ -972,7 +968,7 @@ server.tool(
 
 server.tool(
   'gripforge_cape',
-  'Cape rig: 3-column bone grid on neck/spine, skins the cape, bakes attached_cape.glb + Godot spring / Three verlet snippets. ' +
+  'Cape rig: 3-column bone grid on neck/spine, skins the cape, bakes attached_cape.glb + Godot spring snippet. ' +
     'Writes the folder (npm). 1 credit. Inputs: Library ids or https URLs.',
   {
     character_id: z.string().optional().describe('Library id of a rigged character (lib_…)'),
@@ -1450,7 +1446,7 @@ server.tool(
 
 server.tool(
   'gripforge_aim',
-  'Aim-offset poses for a Library character/armed bind (0 credits): for each hand, two-bone IK + wrist alignment so the WEAPON AXIS (gf_muzzle locator from gripforge_loadout, else the seat forward) points at every direction of a yaw×pitch grid. Returns bone-local quaternions per pose + rest, and a Three.js/Godot blend snippet. Works for dual wield (independent hands) and any Mixamo/UAL/Tripo rig. out_dir writes aim.json.',
+  'Aim-offset poses for a Library character/armed bind (0 credits): for each hand, two-bone IK + wrist alignment so the WEAPON AXIS (gf_muzzle locator from gripforge_loadout, else the seat forward) points at every direction of a yaw×pitch grid. Returns bone-local quaternions per pose + rest, and a Godot blend snippet. Works for dual wield (independent hands) and any Mixamo/UAL/Tripo rig. out_dir writes aim.json.',
   {
     attach_id: z.string().optional().describe('Armed bind / loadout id (lib_…) — preferred'),
     character_id: z.string().optional().describe('Character id if no bind'),
@@ -1555,7 +1551,7 @@ server.tool(
   'Build a multi-weapon character in ONE call: attaches every prop of every set onto the same rig, ' +
     'names each prop node gf_prop_<slug>_<l|r>, stamps glTF extras { gripforge: { prop, set, hand } } and a ' +
     'scene manifest { default, sets }, then (by default) retargets the standard clip pack. ' +
-    'The engine switches weapons by toggling node visibility — the returned Three.js snippet does it. ' +
+    'The engine switches weapons by toggling node visibility. ' +
     'Example sets: { "sword": [{"prop_id":"lib_sword"}], "guns": [{"prop_id":"lib_gun","hand":"left","style":"gun"}, {"prop_id":"lib_gun","hand":"right","style":"gun"}] }. ' +
     'Credits: one attach per prop.',
   {
@@ -2534,10 +2530,10 @@ server.tool(
 
 server.tool(
   'gripforge_input_kit',
-  'InputMap presets: fps (WASD + arrows on move_*) or kart (accelerate/brake/steer + standard gamepad RT/LT/stick, same indices as the web Gamepad API). Write gripforge/input.json, autoload GfInput. Optional third_person=true adds portable character-facing JavaScript and a Three.js adapter; orientation only, not a physics controller. 0 credits.',
+  'InputMap presets: fps (WASD + arrows on move_*) or kart (accelerate/brake/steer + standard gamepad RT/LT/stick, same indices as the web Gamepad API). Write gripforge/input.json, autoload GfInput. Optional third_person=true adds portable character-facing JavaScript; orientation only, not a physics controller. 0 credits.',
   {
     prompt: z.string().min(2).max(240).describe('e.g. fps or tactical bomb defusal'),
-    third_person: z.boolean().optional().describe('Include character-facing JavaScript and Three.js usage (default false; existing input map unchanged).'),
+    third_person: z.boolean().optional().describe('Include character-facing JavaScript (default false; existing input map unchanged).'),
   },
   async ({ prompt, third_person }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
@@ -2552,7 +2548,7 @@ server.tool(
 
 server.tool(
   'gripforge_light_kit',
-  'Moon / sun / candle lights + fog + Three.js snippet for a game look. 0 credits. Pair with scene_kit.',
+  'Moon / sun / candle lights + fog + Godot snippet for a game look. 0 credits. Pair with scene_kit.',
   { prompt: z.string().min(2).max(240).describe('e.g. stylish gothic action') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
@@ -2578,7 +2574,7 @@ server.tool(
 
 server.tool(
   'gripforge_loading_page',
-  'Loading overlay for Three/Godot/Unity/Unreal. project_id uses persistent quoted generation: action quote → accept → get → apply, with creation_id and quote_token. Title is text. Overlay 0 credits. Pass character_id to generate a 16:9 cinematic still of that Library character (1 credit, no letters in the image).',
+  'Loading overlay for Godot/Unity/Unreal (web overlay html/css/js included). project_id uses persistent quoted generation: action quote → accept → get → apply, with creation_id and quote_token. Title is text. Overlay 0 credits. Pass character_id to generate a 16:9 cinematic still of that Library character (1 credit, no letters in the image).',
   {
     project_id:z.string().optional(), action:z.enum(['quote','accept','get','apply']).optional(), creation_id:z.string().optional(), quote_token:z.string().optional(),
     prompt: z.string().min(2).max(2000).describe('e.g. stylish gothic action'),
@@ -2700,11 +2696,7 @@ server.tool(
         await writeFile(join(dir, 'vfx.json'), data.snippets.json);
         wrote.push(join(dir, 'vfx.json'));
       }
-      const snip = data.snippets as { three?: string; unity?: string; godot?: string } | undefined;
-      if (snip?.three) {
-        await writeFile(join(dir, 'three.js.txt'), snip.three);
-        wrote.push(join(dir, 'three.js.txt'));
-      }
+      const snip = data.snippets as { unity?: string; godot?: string } | undefined;
       if (snip?.unity) {
         await writeFile(join(dir, 'unity.cs.txt'), snip.unity);
         wrote.push(join(dir, 'unity.cs.txt'));
@@ -2774,13 +2766,13 @@ server.tool(
 server.tool(
   'gripforge_shader_pull',
   'Pull a catalog shader into the open repo and return an assignment snippet. ' +
-    'id = slug or alias (slash_reveal). engine = godot | unity | three. ' +
+    'id = slug or alias (slash_reveal). engine = godot | unity (Three.js is no longer a supported target). ' +
     'Writes sources into out_dir. Godot → ShaderMaterial (SpatialMaterial/StandardMaterial3D cannot run custom code). ' +
-    'Unity → ShaderLab Material. Three → ShaderMaterial. Example: "put slash_reveal Godot on my arc". ' +
+    'Unity → ShaderLab Material. Example: "put slash_reveal Godot on my arc". ' +
     'v1 pull is free (no credit).',
   {
     id: z.string().describe('Shader id or alias (slash_reveal, circular_cresent_slash_2d_mask, …)'),
-    engine: z.enum(['godot', 'unity', 'three']).describe('Target engine'),
+    engine: targetEnum(z as never, ['godot', 'unity'] as const).describe('Target engine'),
     out_dir: z.string().describe('Folder to write shader files into (repo path)'),
   },
   async ({ id, engine, out_dir }) => {
