@@ -72,6 +72,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_render_preview',
   'gripforge_cancel_render_preview',
   // debug.inspector of a game open in a browser by the team: its snapshot (gripforge.debug/1) and its ops.
+  'gripforge_debug_sessions',
   'gripforge_debug_snapshot',
   'gripforge_debug_set',
 ] as const;
@@ -313,6 +314,10 @@ export function registerGameKitTools(
   // of the workspace has open (its session of the runtime mailbox); the page answers through the kit and the player.
   const debugSession = schema.string().max(96).optional().describe('A play session (play-…) of gripforge_runtime_sessions; default: the latest play page of the project.');
   const debugWait = schema.number().min(0).max(20).optional().describe('Seconds to wait for the page to answer (default 8); 0 answers at once with status received.');
+  tool('gripforge_debug_sessions', 'Live game tabs for the debug inspector',
+    'List the play tabs of a game that a member of the workspace has open right now (heartbeat within 30 s; closed tabs are gone): session id, last seen, viewer role, engine, backend (webgpu/webgl2) and render thread (worker/main). The first is the default target of gripforge_debug_snapshot / gripforge_debug_set. Empty: no tab is open, and the debug tools answer at once that no game tab is open. 0 credits.',
+    { project_id: projectId }, { readOnly: true },
+    async (args, extra) => api(`gamekit-projects/${encodeURIComponent(String(args.project_id))}/debug`, {}, 'GET', extra?.signal, { sessions: 1 }));
   tool('gripforge_debug_snapshot', 'Debug snapshot of a running game',
     'Read the debug inspector of a game open in a browser by a member of its workspace (the play page, Bevy player): frame rate and frame time (p50/p95/p99, worst, slow frames, stages of a frame), GPU and backend (webgpu, webgl2, vulkan, dx12, metal…, software rasteriser or not), draws, meshes, triangles, materials, lights, textures and their memory, entities, memory; the modes (wireframe, colliders, bounds), the selection, hidden and outlined nodes, the debug modes the kits registered and their data; with tree=true the scene tree (scenes, nodes, meshes with vertices / triangles / material, world boxes) within depth and max_nodes. JSON contract gripforge.debug/1, identical on every engine. The inspector is open to everyone by default; a game where the developer turned it off (kit debug.inspector config enabled: false, set with gripforge_gamekit_configure) answers "not open to this viewer". Use it to find why a game is slow or wrong before changing it. Same rights as the panel: members of the workspace. 0 credits.',
     { project_id: projectId, session_id: debugSession, tree: schema.boolean().optional().describe('Also build the scene tree (default false).'),
