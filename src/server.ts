@@ -2521,7 +2521,7 @@ server.tool(
 
 server.tool(
   'gripforge_net_kit',
-  'Godot 4 multiplayer (ENet): GfNet autoload host/join/spawn with server-side hit validation, gf_round.gd for the round + bomb, MultiplayerSpawner/Synchronizer wiring. 0 credits.',
+  'Godot 4 multiplayer (ENet): GfNet autoload host/join/spawn with server-side hit validation, gf_round.gd for the round + bomb, MultiplayerSpawner/Synchronizer wiring. 0 credits. Godot only: for a web game built on the Game Kits the network model is the installed sync kit (net.claim = claim, net.authoritative, net.rollback, net.state; room config.net {model, sync, physics} is read from the project): use gripforge_gamekit_install / gripforge_gamekit_configure, then gripforge_docs topics net and web-multiplayer (rooms at /play/online/host/<project_id>?players=N).',
   { prompt: z.string().min(2).max(240).describe('e.g. tactical 5v5, deathmatch, fps') },
   async ({ prompt }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');

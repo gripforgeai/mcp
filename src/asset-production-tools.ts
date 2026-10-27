@@ -50,7 +50,8 @@ export function registerAssetProductionTools(register: VfxProjectRegister, optio
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       q: schema.string().max(200).describe('Visual role or style, e.g. sci-fi turret, rock, soldier.'),
-      kind: schema.enum(['character','fps-arms','enemy','creatures','weapon','equipment','prop','texture','skybox','vfx','animation','audio','kit']).optional().describe('Optional asset kind.'),
+      kind: schema.enum(['character','fps-arms','enemy','creatures','weapon','equipment','prop','vehicle','texture','skybox','vfx','animation','audio','kit']).optional().describe('Optional asset kind. `vehicle` = props qualified vehicle (cars, karts, bikes). A single plain word in q matches whole words only (car does not return carbine or carrot).'),
+      subtype: schema.string().max(40).optional().describe('Optional qualification inside the kind, e.g. vehicle, boot, door.'),
       source: schema.enum(['workspace','community','both']).optional().describe('Defaults to both.'),
       limit: schema.number().int().min(1).max(48).optional().describe('Results per source; default 12.'),
       offset: schema.number().int().min(0).max(10000).optional().describe('Pagination offset per source; default 0.'),
@@ -61,8 +62,9 @@ export function registerAssetProductionTools(register: VfxProjectRegister, optio
   }, wrap(async args => {
     const limit = Number(args.limit ?? 12), offset = Number(args.offset ?? 0);
     const target = args.target === 'desktop' ? 'desktop' : 'mobile';
-    const qs = new URLSearchParams({ q: String(args.q ?? ''), limit: String(limit), offset: String(offset), sort: args.sort === 'newest' ? 'newest' : 'rank', target });
+    const qs = new URLSearchParams({ q: String(args.q ?? ''), limit: String(limit), offset: String(offset), sort: args.sort === 'newest' ? 'newest' : 'rank', target, match: 'word' });
     if (args.kind) qs.set('kind', String(args.kind));
+    if (args.subtype) qs.set('subtype', String(args.subtype));
     const sources = args.source === 'workspace' ? ['workspace'] : args.source === 'community' ? ['community'] : ['workspace','community'];
     const data = await Promise.all(sources.map(async source => {
       const response = await request(`${source === 'workspace' ? 'library' : 'community'}?${qs}`, args.workspace_id, 'GET', undefined, 'gripforge_asset_search');
