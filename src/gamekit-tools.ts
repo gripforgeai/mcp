@@ -37,6 +37,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_game_capabilities',
   'gripforge_game_project',
   'gripforge_game_art_direction',
+  'gripforge_game_publish',
   'gripforge_game_theme_from_concept',
   'gripforge_game_asset_plan',
   'gripforge_gamekit_creatures',
@@ -254,7 +255,7 @@ export function registerGameKitTools(
   for (const [name, action, description] of completionTools) register(`gripforge_${name}`, {
     title: `Game completeness: ${name.replaceAll('_', ' ')}`, description: withJourney(`gripforge_${name}`, description),
     inputSchema: { project_id: projectId, ...workspace,
-      ...(action === 'define' ? { contract: schema.record(schema.string(),schema.unknown()).describe('GameCompletionContract matching the versioned schema returned by get_completion_report.'), expected_revision: schema.number().int().min(0).describe('Revision of the saved contract as get_completion_report returns it (0 for the first definition): a stale revision is refused.') } : {}),
+      ...(action === 'define' ? { contract: schema.record(schema.string(),schema.unknown()).describe('GameCompletionContract matching the versioned schema returned by get_completion_report.'), expected_revision: schema.number().int().positive().describe('Current revision of the PROJECT (the `revision` field get_completion_report returns, also for a project with no contract yet; it is not a contract counter and 0 is never right). The save is refused with revision_conflict (actual revision in details) if the project changed since.') } : {}),
       ...(action === 'complete' || action === 'test' ? { max_attempts: schema.number().int().min(1).max(12).optional().describe('Upper bound of attempts of the queued job (1-12).'), idempotency_key: schema.string().min(8).max(160).optional().describe('Repeat the same key to get the job already queued instead of a new one.') } : {}),
     },
     outputSchema: {
@@ -650,6 +651,19 @@ export function registerGameKitTools(
       if (args.art_direction === undefined || args.expected_revision === undefined) return Promise.resolve(fail('set needs art_direction and expected_revision from get.'));
       return api(path, { workspace_id: args.workspace_id, artDirection: args.art_direction, expected_revision: args.expected_revision }, 'PATCH', extra?.signal);
     },
+  );
+
+  tool(
+    'gripforge_game_publish',
+    'Publish a game (preview or release) or take it offline',
+    'Publish the Game Kit project so its play link opens without an account, and start its online server if the game is online (same API as the Publish button and `gripforge game-publish`). mode=preview shares a TEST build: no release checks (completion, animation proof), the project is marked preview; use it to let testers join an online game before it is release-ready. mode=release (default) runs the release checks and refuses with the blockers if the build is not ready. unpublish=true takes the game and its online server offline (mode is ignored). Needs an editor role on the owning workspace. Returns published, publicationMode and playUrl. 0 credits.',
+    {
+      project_id: projectId,
+      mode: schema.enum(['preview', 'release']).optional().describe('preview: shared test build without release checks; release (default): full release checks.'),
+      unpublish: schema.boolean().optional().describe('true: take the game offline instead of publishing.'),
+    },
+    { readOnly: false },
+    (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/publish`, { workspace_id: args.workspace_id, published: !args.unpublish, ...(!args.unpublish && args.mode ? { mode: args.mode } : {}) }, 'POST', extra?.signal),
   );
 
   tool(
