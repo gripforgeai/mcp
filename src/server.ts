@@ -103,6 +103,7 @@ server.tool(
   'Attach a prop (sword, shield, gun, staff/scythe…) onto a rigged character. ' +
     'Finds the hand bone across naming schemes, scales to body height, seats the grip, ' +
     'and returns a bind + ready-to-paste Unity / Godot snippets. ' +
+    'For melee, provide prop_grip.edgeAxis (signed cutting direction, distinct from the flat normal) and handleSpan (usable handle length). Read bind.orientation and bind.contact; missing or ambiguous measurements remain needs_review. ' +
     'Pass local paths or Library ids (character_id / prop_id). After attach the bind ' +
     '(+ armed GLB when export_glb) is saved in Library — not a second credit. ' +
     'Exact placement: add an Empty/locator named "grip" on the handle inside the weapon file — ' +
@@ -244,7 +245,7 @@ server.tool(
       });
       const data2 = (await res2.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res2.ok) return err(`second attach failed (${res2.status}): ${String(data2.error ?? 'unknown error')}`);
-      data = { ...data2, first_attach: first.id };
+      data = { ...data2, first_attach: first.id, first_bind: data.bind };
     }
 
     const exportsObj = (data.exports ?? {}) as Record<string, string>;
@@ -299,7 +300,7 @@ server.tool(
           text:
             (upgrade ? upgrade + '\n\n' : '') +
             JSON.stringify(
-              { bind: data.bind, confidence: data.confidence, exports: exportsObj, wrote, glbFile, library },
+              { bind: data.bind, ...(data.first_bind ? { first_bind: data.first_bind, first_attach: data.first_attach } : {}), confidence: data.confidence, exports: exportsObj, wrote, glbFile, library },
               null,
               2,
             ) +
