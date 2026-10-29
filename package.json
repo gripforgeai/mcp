@@ -1,6 +1,6 @@
 {
   "name": "@gripforgeai/mcp",
-  "version": "0.1.154",
+  "version": "0.1.155",
   "description": "The tools your AI needs to make your games. Turn prompts into production-ready game assets \u2014 animated characters with their weapons attached, seamless textures, terrain, VFX, HUDs \u2014 and shared game creation for the GripForge player, Unity, Godot and Unreal.",
   "license": "MIT",
   "type": "module",

@@ -1,7 +1,7 @@
 /**
  * The collision of models, made on the developer's machine: the MCP side of `gripforge collision`.
  * The work is collision-local.generated.ts — the same code as the CLI, which runs the LOD kit's `collision` op (the compute
- * service's `buildCollision` and the Rust tool of native/gripforge-collision). A model, a folder, or the bound models of a
+ * service's `buildCollision` and the Rust tool of module-kits tools/collision). A model, a folder, or the bound models of a
  * game (`game`, a gkp_ id): the server says what each needs, the missing descriptions are made here and handed back (or made
  * by the service with `server`). Each answer carries the CHOICE (method, score) and its reason. Registered by `server.ts`
  * only: the hosted MCP never reaches the caller's disk.

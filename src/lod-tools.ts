@@ -1,7 +1,7 @@
 /**
  * The mesh levels (LOD) and optimised textures of a model, made on the developer's machine: the MCP side of `gripforge lod`.
  * The work is lod-local.generated.ts — the same code as the CLI, which runs the LOD kit (the compute service's manufacture,
- * the Rust simplifier of native/gripforge-lod). A model, a folder, or the bound models of a game (project_id): the server says
+ * the Rust simplifier of module-kits tools/lod). A model, a folder, or the bound models of a game (project_id): the server says
  * what each needs, only the missing copies are made here and handed back, so the service finds them and makes nothing.
  * Registered by `server.ts` only: the hosted MCP never reaches the caller's disk.
  */
