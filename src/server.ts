@@ -1328,8 +1328,9 @@ server.tool(
 
 server.tool(
   'gripforge_animate',
-  'Retarget the standard clip pack onto a Mixamo-named Library character/enemy/armed bind. In a Game Kit project gripforge_gamekit_creatures runs it for free on every bound creature, and gripforge_game_audit lists the models still lacking movement or action clips. Base slots (idle, walk, run, attack1-3, hit, death, dodge) + extras (taunt, stinger, knockback, block, jump_start/loop/land, idle_guns, shoot, reload, aim, crouch_idle, crouch_walk, knife). archetype remaps the base slots: sword (default), claws (zombie scratch), heavy (slow + heavy combo), brawler (punches), puppet (stiff walk + throws), operator (CS-style: knife/punch strikes). Opt-in slots fire_breath (mouth exhalation) and energy_cast (two-hand azure wave) use the Studio VFX character motions. Saves kind=animation. 0 credits.',
+  'Retarget the standard clip pack onto a Mixamo-named Library character/enemy/armed bind. In a Game Kit project gripforge_gamekit_creatures runs it for free on every bound creature, and gripforge_game_audit lists the models still lacking movement or action clips. Base slots (idle, walk, run, attack1-3, hit, death, dodge) + extras (taunt, stinger, knockback, block, jump_start/loop/land, idle_guns, shoot, reload, aim, crouch_idle, crouch_walk, knife). archetype remaps the base slots: sword (default), claws (zombie scratch), heavy (slow + heavy combo), brawler (punches), puppet (stiff walk + throws), operator (CS-style: knife/punch strikes). Opt-in slots fire_breath (mouth exhalation) and energy_cast (two-hand azure wave) use the Studio VFX character motions. For captured two-hand saber guards/parries use actions with pack=touche and TC_Saber_* clips from GET /api/v1/animate-pack; retains CC BY 4.0 attribution. Explicit actions replace the preset selection. Saves kind=animation. 0 credits.',
   {
+    actions: z.array(z.object({ slot: z.string().min(1).max(80), pack: z.enum(['ual1','ual2','kim','kmd','touche']), clip: z.string().min(1).max(80) })).max(32).optional().describe('Explicit library clips; Touché is two-hand defensive motion, not a full duel.'),
     character_id: z.string().describe('Library character, enemy, or armed bind'),
     archetype: z.enum(['sword', 'claws', 'heavy', 'brawler', 'puppet', 'operator']).optional().describe('Movement/strike archetype — remaps the base slots (default sword); operator = CS-style (knife/punch strikes, guns via idle_guns/shoot/reload/aim, crouch_idle/crouch_walk)'),
     slots: z
@@ -1338,12 +1339,12 @@ server.tool(
     name: z.string().optional(),
     out_dir: z.string().optional().describe('Also write the animated GLB here'),
   },
-  async ({ character_id, archetype, slots, name, out_dir }) => {
+  async ({ character_id, archetype, slots, actions, name, out_dir }) => {
     if (!API_KEY) return err('GRIPFORGE_API_KEY missing.');
     const res = await fetch(`${API_URL}/api/v1/animate-pack`, {
       method: 'POST',
       headers: { ...apiHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify({ character_id, archetype, slots, name }),
+      body: JSON.stringify({ character_id, archetype, slots, actions, name }),
     });
     const data = (await res.json().catch(() => ({}))) as {
       error?: string;
