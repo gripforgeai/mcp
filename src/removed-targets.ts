@@ -1,6 +1,6 @@
 import type { z } from 'zod/v4';
 /** Three.js n'est plus une cible de build : toute demande l'indiquant est refusée explicitement (jamais remappée). */
-export const THREEJS_REMOVED_MESSAGE = "Three.js n'est plus une cible supportée ; utilisez web (lecteur GripForge), godot, unity ou unreal";
+export const THREEJS_REMOVED_MESSAGE = "Three.js n'est plus une cible supportée ; utilisez bevy (lecteur GripForge), godot, unity ou unreal";
 export function isRemovedThreeTarget(v: unknown): boolean {
   return typeof v === 'string' && ['threejs', 'three', 'three.js', 'r3f'].includes(v.toLowerCase());
 }

@@ -17,9 +17,15 @@ export function joystickAxis(x: number, y: number, deadzone = .15): { x: number;
   return {x:x*scale,y:y*scale};
 }
 
-export function createJoystickKit(target: JoystickTarget | 'all', options: Partial<JoystickConfig> = {}) {
+export function createJoystickKit(target: JoystickTarget | 'all' | 'bevy' | 'web', options: Partial<JoystickConfig> = {}) {
   const config={...joystickDefaults,...options};
   if (isRemovedThreeTarget(target)) throw Error(THREEJS_REMOVED_MESSAGE);
+  // Bevy (the GripForge player) has its touch sticks in the kit input.virtualpad: nothing to write, never a refusal.
+  if (target==='bevy'||target==='web') return {
+    schema:'gripforge.joystick-kit.v1', module:'input.joystick', version:'1.0.0', credits:0, config, deliveries:[], status:'not_needed', applied:false,
+    warnings:[{code:'joystick_in_virtualpad',message:'Bevy (the GripForge player) needs no joystick source files: its touch sticks are the kit input.virtualpad, a default kit of every game.',skipped:['joystick source files'],howToFix:'Configure input.virtualpad on the Game Kit project (gripforge_gamekit_configure, kit input.virtualpad: layout, dead zone, radius) or choose the control scheme with gripforge_game_project action=controls.'}],
+    next:'Configure input.virtualpad instead.',
+  };
   if (!['godot','unity','unreal','all'].includes(target)) throw Error('Unknown joystick target.');
   if (!['move','dual'].includes(config.layout) || !Number.isFinite(config.deadzone) || config.deadzone<0 || config.deadzone>.5 ||
       !Number.isFinite(config.radius) || config.radius<32 || config.radius>160 || !/^#[\da-f]{6}$/i.test(config.accent)) throw Error('Invalid joystick configuration.');

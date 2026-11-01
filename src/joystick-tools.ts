@@ -8,7 +8,7 @@ export const JOYSTICK_TOOL_NAMES = ['gripforge_joystick_kit'] as const;
 
 export function registerJoystickTools(register: VfxProjectRegister, schema: typeof z = z) {
   const shape = {
-    target: targetEnum(schema, ['godot','unity','unreal','all']).describe('Engine delivery. all returns each of the three source kits.'),
+    target: targetEnum(schema, ['godot','unity','unreal','all','bevy','web']).describe('Engine delivery. all returns each of the three source kits; bevy (the GripForge player, also web) has its sticks in input.virtualpad: the answer says how to set it.'),
     layout: schema.enum(['move','dual']).default('dual').describe('One movement stick, or independent movement + camera sticks.'),
     deadzone: schema.number().min(0).max(.5).default(.15).describe('Radial deadzone, continuously rescaled to a unit disc.'),
     radius: schema.number().min(32).max(160).default(72).describe('Stick radius in CSS/UI logical pixels, before engine DPI scaling.'),

@@ -50,6 +50,7 @@ import { registerMapUnrealExportLocalTools } from './map-unreal-export-local.js'
 import { registerReverseTools } from './game-import-reverse.js';
 import { registerGameImportTools } from './game-import-tools.js';
 import { packageVersion, startUpdateCheck } from './update-check.js';
+import { surfaceWarningsOnServer } from './tool-warnings.js';
 
 const API_URL = process.env.GRIPFORGE_API_URL ?? 'https://gripforge.ai';
 const API_KEY = process.env.GRIPFORGE_API_KEY;
@@ -58,6 +59,8 @@ const MCP_SELF = packageVersion();
 const SUPPORTED = ['.glb', '.gltf', '.fbx', '.obj'];
 
 const server = new McpServer({ name: 'gripforge', version: MCP_SELF });
+// « On ne refuse jamais » (docs/refus-metier.md): every tool states the warnings of its answer.
+surfaceWarningsOnServer(server);
 registerVfxProjectTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerSceneTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGamePublicationTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getToken: () => process.env.GRIPFORGE_PUBLICATION_TOKEN });

@@ -18,6 +18,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod/v4';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { VfxProjectRegister } from './vfx-project-tools.js';
+import { detectLocalProject } from './local-project.generated.js';
 
 export const GAMEKIT_LOCAL_TOOL_NAMES = ['gripforge_gamekit_deliver_local', 'gripforge_gamekit_rollback_local'] as const;
 
@@ -479,7 +480,7 @@ export function registerGameKitLocalTools(register: VfxProjectRegister, options:
         'npm client only. Deliver Game Kits straight into an engine project folder on this machine: hashes project_dir/gripforge/**, reads gripforge/gamekits.lock.json, asks the GripForge API for the plan, then executes plan.actions with fs — every overwritten or deleted file is copied to gripforge/.backup/<plan id>/ first and the lock is written last. Paths are checked inside project_dir (Godot: gripforge/, assets/gripforge/ and addons/gripforge_gameplay|gripforge_net only) and every hash is verified before anything is written. Run dry_run=true first. A blocked plan (files edited in the project) returns the conflicts without touching files: re-run with force to back them up and overwrite. Kits always deliver at their latest version. verify=true runs Godot headless (import, then each kit smoke.gd) when GODOT_BIN is set. Undo with gripforge_gamekit_rollback_local. Credits: the first delivery of a kit major version to an engine costs 1 credit per workspace; re-deliveries, updates within a major and dry runs are free.',
       inputSchema: {
         project_dir: projectDirField,
-        target: schema.enum(LOCAL_TARGETS).optional().describe('Engine of the project: godot (default), unity or unreal. rust (the Rust / Bevy runtime) writes no file: the answer is the native compatibility report — which kits have a Rust module and what blocks the project on the Bevy player.'),
+        target: schema.enum(LOCAL_TARGETS).optional().describe('Engine of the project: godot, unity or unreal; left out, the engine found in project_dir (a Bevy project answers how to attach it with the CLI). rust (the Rust / Bevy runtime) writes no file: the answer is the native compatibility report — which kits have a Rust module and what blocks the project on the Bevy player.'),
         kits: schema
           .array(
             schema.object({
@@ -513,14 +514,20 @@ export function registerGameKitLocalTools(register: VfxProjectRegister, options:
           const { status, data } = await callDeliver({ target: 'rust', ...(kits.length ? { kits } : {}), projectId: args.project_id, dryRun: true }, typeof args.workspace_id === 'string' ? args.workspace_id : undefined, extra?.signal);
           return toolResult({ ...context, ...data, written: [] }, status >= 400);
         }
-        const target = (typeof args.target === 'string' ? args.target : 'godot') as Target;
+        // The engine of the folder when none is given (never a Godot guess); a Bevy project needs no engine files.
+        const found = await detectLocalProject(dir);
+        const skipped = (code: string, message: string, howToFix: string) =>
+          toolResult({ project_dir: dir, engine: found?.engine ?? null, applied: false, written: [], warnings: [...report.warnings, { code, message, skipped: ['delivery'], howToFix }] });
+        if (typeof args.target !== 'string' && found?.engine === 'bevy') return skipped('bevy_use_game_attach', `${dir} is a Bevy project: its kits run in the GripForge player, there are no engine files to deliver.`, `Bring the game into the folder with the CLI: gripforge game-attach <gkp_id> ${dir} (again after each change). target rust answers the native compatibility of the kits.`);
+        if (typeof args.target !== 'string' && !found) return skipped('engine_project_not_found', `${dir} holds no engine project (project.godot, Unity ProjectSettings, Unreal .uproject, Bevy crate): nothing was delivered.`, 'Pass project_dir = the folder of the user\'s engine project, or target godot | unity | unreal explicitly; to start a project, gripforge game-attach <gkp_id> <empty folder> --engine bevy|godot|unity|unreal.');
+        const target = (typeof args.target === 'string' ? args.target : found!.engine) as Target;
         if (!TARGETS.includes(target)) throw new LocalError('bad_request', 'target must be godot, unity, unreal or rust');
-        if (target === 'godot' && !(await isFile(join(dir, 'project.godot')))) throw new LocalError('not_a_project', `${dir} has no project.godot: pass the Godot project folder`);
+        if (target === 'godot' && !(await isFile(join(dir, 'project.godot')))) return skipped('not_a_godot_project', `${dir} has no project.godot${found ? ` (it is a ${found.engine} project)` : ''}: nothing was delivered.`, found ? `Leave target out (the folder's engine, ${found.engine}, is used) or pass target ${found.engine}.` : 'Pass project_dir = the folder holding project.godot.');
         const kits = Array.isArray(args.kits) ? args.kits : [];
         const mode = typeof args.mode === 'string' ? args.mode : 'install';
         const { lock, warning } = await readLock(dir, LOCK_PATH);
         if (warning) report.warnings.push(warning);
-        if (!kits.length && typeof args.project_id !== 'string' && !(mode === 'uninstall' && lock)) throw new LocalError('bad_request', 'Pass kits [{ id }] or project_id (gkp_…).');
+        if (!kits.length && typeof args.project_id !== 'string' && !(mode === 'uninstall' && lock)) return skipped('kits_missing', 'No kit and no Game Kit project were given: nothing to deliver.', 'Pass project_id (gkp_…, gripforge_game_project) or kits [{ id }] (gripforge_gamekit_search).');
         const files = await hashProject(dir, lock);
         const engineVersion = target === 'godot' ? await godotVersion(dir) : undefined;
         const dryRun = args.dry_run === true;

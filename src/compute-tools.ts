@@ -3,7 +3,7 @@ import { z } from 'zod/v4';
 import type { VfxProjectRegister } from './vfx-project-tools.js';
 
 /**
- * GripForge Compute: image or text → textured 3D asset (two GLBs), then colour / material variants of the same shape.
+ * GripForge Compute: image or text → textured 3D asset (one or two GLBs, according to the recipe), then colour / material variants of the same shape.
  * Compute is one more engine of the generic tools: gripforge_generate_prop (provider compute), gripforge_generation_read,
  * gripforge_library_list / get (engine compute) and gripforge_library_pull. The generate, job, assets and download
  * tools below are kept as deprecated aliases of those (published since MCP 0.1.115, same response shape); status,
@@ -78,7 +78,7 @@ export function computeGenerator(options: Options) {
       else if (text && typeof item.prompt !== 'string') return fail(`${String(item.name)}: a text asset needs prompt.`);
       const body = {
         provider: 'compute', action: args.stage, source: text ? 'text' : 'image', name: item.name, ...(typeof args.type === 'string' ? { type: args.type } : {}), budget: args.object_type ?? (typeof args.type === 'string' && !['objet', 'meuble'].includes(args.type) ? 'defaut' : 'mobilier_simple'), quality: args.quality ?? 'standard',
-        options: text ? [] : args.options ?? ['photo', 'matieres', 'relief'], ...(text ? { prompt: item.prompt, ...(args.auto_pick === true ? { auto_pick: true } : {}) } : { ...(image ? { image } : { concept_item: item.concept_item }), ...(typeof args.triangles === 'number' ? { triangles: args.triangles } : {}) }),
+        options: args.options ?? (text ? [] : ['photo', 'matieres', 'relief']), ...(typeof args.description === 'string' ? { description: args.description } : {}), ...(text ? { prompt: item.prompt, ...(args.auto_pick === true ? { auto_pick: true } : {}) } : { ...(image ? { image } : { concept_item: item.concept_item }), ...(typeof args.triangles === 'number' ? { triangles: args.triangles } : {}) }),
         ...(args.stage === 'generate' ? { accepted_quote: tokens[index], idempotency_key: list.length > 1 ? `${batchKey.slice(0, 150)}:${index}` : batchKey } : {}),
       };
       const result = await call('/api/v1/generate-asset', { method: 'POST', body, workspace: args.workspace_id, signal });
@@ -114,7 +114,8 @@ export function computeGenerateShape(schema: typeof z, local: boolean) {
     object_type: schema.string().regex(/^[a-z_]{2,40}$/).optional().describe('provider compute: size (budget) of the type, e.g. petit_objet, mobilier_simple; default: the type\'s default'),
     quality: schema.enum(['standard', 'detail']).optional().describe('provider compute: texture quality, default standard'),
     triangles: schema.number().int().min(500).max(200000).optional().describe('provider compute, image assets: exact triangle count of the « near » GLB (the « scene » one gets half)'),
-    options: schema.array(schema.enum(['photo', 'matieres', 'relief'])).max(3).optional().describe('provider compute, image assets: photo, matieres, relief (default all three)'),
+    options: schema.array(schema.enum(['photo', 'matieres', 'relief', 'visage', 'visage_cheveux', 'peau_humaine', 'raffinage'])).max(7).optional().describe('provider compute: photo, matieres, relief; optional raffinage (slower), peau_humaine, visage, visage_cheveux. Face/hair require description and type personnage or mob; prerequisites are included in the quote.'),
+    description: schema.string().max(500).optional().describe('provider compute, face/hair: character appearance in English (age, facial features, hair), required to preserve identity'),
     auto_pick: schema.boolean().optional().describe('provider compute, text: true = take the first of the four images without asking (only when the user wants it). Default with stage: stop on the images; show them (gripforge_generation_read images[]) and validate one with gripforge_compute_validate'),
     quote_token: schema.string().length(64).optional().describe('provider compute, stage=generate: quote.token of the quote with the SAME inputs'),
     quote_tokens: schema.array(schema.string().length(64)).max(5).optional().describe('provider compute, stage=generate with items: the quote tokens in item order'),
@@ -159,7 +160,8 @@ export function registerComputeTools(register: VfxProjectRegister, options: Opti
       object_type: schema.string().regex(/^[a-z_]{2,40}$/).optional().describe('Size (budget) of the type, e.g. petit_objet, mobilier_simple; default: the type\'s default'),
       quality: schema.enum(['standard', 'detail']).optional().describe('Texture quality. Default standard'),
       triangles: schema.number().int().min(500).max(200000).optional().describe('Image assets only: exact triangle count of the « near » GLB (the « scene » one gets half). Default: from object_type. For a finished asset (also from text), use gripforge_compute_variant kind=budget'),
-      options: schema.array(schema.enum(['photo', 'matieres', 'relief'])).max(3).optional().describe('Image assets: photo (keep visible details), matieres (refine materials), relief (surface detail). Default all three'),
+      options: schema.array(schema.enum(['photo', 'matieres', 'relief', 'visage', 'visage_cheveux', 'peau_humaine', 'raffinage'])).max(7).optional().describe('photo, matieres, relief; optional raffinage (slower), peau_humaine, visage, visage_cheveux. Face/hair require description and type personnage or mob. Prerequisites are included in the quote.'),
+      description: schema.string().max(500).optional().describe('Character appearance in English (age, facial features, hair), required for visage / visage_cheveux'),
       auto_pick: schema.boolean().optional().describe('Text assets: true = take the first image without asking (only when the user explicitly wants it). Default: stop and wait for gripforge_compute_validate'),
       quote_token: schema.string().length(64).optional().describe('stage=generate, single asset: quote.token from the quote with the SAME inputs'),
       quote_tokens: schema.array(schema.string().length(64)).max(5).optional().describe('stage=generate with items: the quote tokens in item order'),

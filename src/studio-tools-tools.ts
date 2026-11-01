@@ -18,7 +18,8 @@ export function registerStudioToolsTools(register: VfxProjectRegister, options: 
   const shapes = {
     studios: { item_id: libId.optional().describe('A locker item: the answer says which tools are possible on it right now.'), workspace_id: ws },
     run: {
-      tool: schema.string().min(1).max(40).describe('Tool id from gripforge_studios (passport, rig, mannequin).'),
+      tool: schema.string().min(1).max(60).describe('Tool id from gripforge_studios: a site tool (passport, rig, mannequin) or a tools-chain tool (glb.stats, glb.lod-verified, …).'),
+      input: schema.record(schema.string(), schema.unknown()).optional().describe('Input of a tools-chain tool (JSON object). Disk paths are removed: pass item_id, the server sets its path.'),
       item_id: libId.optional().describe('Locker item the chain works on. mannequin without item = the adult canon.'),
       step: schema.string().max(40).optional().describe('Replay ONE step (the one you just corrected) instead of the whole chain.'),
       force: schema.boolean().optional().describe('Recompute fresh blocks too. Default: fresh blocks are skipped.'),
@@ -72,7 +73,7 @@ export function registerStudioToolsTools(register: VfxProjectRegister, options: 
     {
       name: 'gripforge_tool_run', title: 'Studios · run a chained tool', readOnly: false, shape: shapes.run,
       description: 'Run a chained tool server-side (computation happens in the GripForge compute service). Returns the step-by-step run. status "needs-manual" = the chain stopped on purpose: read manual_hint, fix it (gripforge_mesh_passport) or send the user to `url`, then replay with step=<that step>. mannequin with an item = chain passport → rig → mannequin, a new locker item.',
-      run: (a, s) => call('POST', '/api/v1/tools/run', a, { tool: a.tool, id: a.item_id ?? null, step: a.step ?? null, force: a.force === true, source: 'mcp' }, s),
+      run: (a, s) => call('POST', '/api/v1/tools/run', a, { tool: a.tool, id: a.item_id ?? null, step: a.step ?? null, force: a.force === true, input: a.input, source: 'mcp' }, s),
     },
     {
       name: 'gripforge_tool_runs', title: 'Studios · run history', readOnly: true, shape: shapes.runs,

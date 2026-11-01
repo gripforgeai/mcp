@@ -82,35 +82,42 @@ export const GAMEKIT_TOOL_NAMES = [
  * leads to. One table, so the journey reads the same from every tool — and one place to change it.
  */
 export const TOOL_JOURNEY: Record<string, string> = {
-  gripforge_gamekit_search: 'Journey — first: find the preset of the genre. Its `done` says what a finished game of that genre has beyond the request: write it into the contract (gripforge_define_game) as required, and gripforge_game_audit checks it at the end.',
+  gripforge_gamekit_search: 'Journey — first: analyse the project or the plan, then recommend the kits that fit, each with what it brings, and offer to plug them in ("these kits would help: shall I plug them in?"); never impose them. A preset of a known genre has a `done` list: proposals of what a finished game of that genre usually has, recorded in the contract (gripforge_define_game) when the user takes them; gripforge_game_audit checks what was chosen at the end',
   gripforge_gamekit_installed: 'Journey — first on an existing project; gripforge_game_audit then says what stands between it and a finished game.',
   gripforge_gamekit_install: 'Journey — while composing. A kit installed and left empty is not done (audio.core without a sound, ui.endscreen without an end condition): gripforge_game_audit names them.',
   gripforge_gamekit_configure: 'Journey — while composing, and to fix what gripforge_game_audit reports (its defects carry the exact config to write).',
   gripforge_game_capabilities: 'Journey — while composing; gripforge_game_audit includes this report, with the creatures, the controls, the playtest and the definition of done of the genre.',
-  gripforge_game_project: 'Journey — create, then bind a model to every creature slot (get carries the creatures report) and set the controls: action=controls applies the control scheme of the gameplay, a proposal to adapt. Before telling the user the game is done: gripforge_game_audit.',
-  gripforge_gamekit_creatures: 'Journey — right after creating or binding: no unit stays a capsule, every model gets its movement and action clips. gripforge_game_audit folds this report with the rest and applies the free steps with fix=true.',
+  gripforge_game_project: 'Journey — create (or reuse the user\'s project), then bind a model to each creature slot the game has (get carries the creatures report) and set the controls: action=controls applies the control scheme of the gameplay, a proposal to adapt. Before telling the user the game is done: gripforge_game_audit',
+  gripforge_gamekit_creatures: 'Journey — when the game has creatures, right after creating or binding: no unit stays a capsule, every model gets its movement and action clips (read from its passport, never named in code). gripforge_game_audit folds this report with the rest and applies the free steps with fix=true',
   gripforge_game_engine: 'Journey — the build order of the content; its last step is gripforge_game_audit, not "it loads".',
   gripforge_game_mods: 'Journey — while building or after: a packaged way to apply the same extension mechanisms (config, documents, hooks, reactions) as one separable unit — a variant to switch on, content added over the game, a game opened to its players\' mods (an option of the developer). gripforge_game_audit then plays the modded game.',
-  gripforge_game_content: 'Journey — the content of the game. Once written, gripforge_game_audit says what a finished game of the genre still lacks (a quest, a way to win and to lose, dialogues…).',
+  gripforge_game_content: 'Journey — the content of the game, as data (documents, config), never as code. Once written, gripforge_game_audit lists what a game of its genre usually has, as proposals (a quest, a way to win or lose, dialogues…)',
   gripforge_game_test: 'Journey — after each change: it also checks what the game chose (its scheme\'s gestures, fullscreen, right button, pointer capture, texts against the bindings). A playtest that passes is not a finished game: gripforge_game_audit (playtest="run" runs this test) gives the verdict and everything the tester cannot see.',
   gripforge_game_play_url: 'Journey — to look at the running game. Share it as finished only when gripforge_game_audit says complete and gripforge_validate_release says ready; otherwise say what is left.',
-  gripforge_game_web_export: 'Journey — last. Run gripforge_game_audit then gripforge_validate_release first: export a game whose verdict is complete and whose release is ready, or tell the user what is left.',
-  gripforge_gamekit_deliver: 'Journey — last. Run gripforge_game_audit then gripforge_validate_release first: deliver a game whose verdict is complete and whose release is ready, or tell the user what is left.',
+  gripforge_game_web_export: 'Journey — last, and never for a local engine project (gripforge game-attach works in it). Run gripforge_game_audit then gripforge_validate_release first: export a game whose verdict is complete and whose release is ready, or tell the user what is left.',
+  gripforge_gamekit_deliver: 'Journey — kits into a local engine project, in place (with the CLI: gripforge game-attach <gkp_id> <folder>, Bevy, Godot, Unity or Unreal; never an export); a final delivery is last. Run gripforge_game_audit then gripforge_validate_release first: deliver a game whose verdict is complete and whose release is ready, or tell the user what is left.',
   gripforge_moba_roster: 'Journey — a MOBA needs distinct heroes; then gripforge_game_audit for the minions, towers, jungle monsters and the rest of a finished MOBA.',
   gripforge_ability_vfx: 'Journey — after the roster; gripforge_game_audit lists it among what a finished MOBA has.',
-  gripforge_define_game: 'Journey — right after choosing the genre. The finished game of its genre is the default scope: its definition of done and what every game has (a way to win AND to lose, title / pause / end screens, sound, the genre HUD, touch controls, a loop playable from start to end) are required capabilities; exclude one only when the user explicitly asks (an endless game), and say so.',
+  gripforge_define_game: 'Journey — once the user\'s game is understood (any game: no character, enemy, level, ending or known genre is required). Record what the game contains; for a known genre, its definition of done and the common frame (title / pause / end screens, sound, HUD, touch controls, a way to win or lose when the game has an end) are proposals to offer, recorded when the user takes them.',
   gripforge_get_completion_report: 'Journey — while building: what the contract still misses, leaves unverified, fails or blocks. The genre defects come from gripforge_game_audit.',
   gripforge_test_game: 'Journey — after each change, with gripforge_game_test (the headless playtest). Passing tests are not a finished game: gripforge_game_audit, then gripforge_validate_release.',
-  gripforge_validate_release: 'Journey — last, after gripforge_game_audit says complete. The game is finished only when report.ready=true on a contract that holds the genre requirements; otherwise tell the user what is left and why.',
+  gripforge_validate_release: 'Journey — last, after gripforge_game_audit says complete. The game is finished only when report.ready=true on a contract that holds what the user chose for the game (genre proposals taken included); otherwise tell the user what is left and why.',
 };
 
 /** The tool's place in the journey, then its description (whose closing credit rule stays last). */
 function withJourney(name: string, description: string): string {
   const journey = TOOL_JOURNEY[name];
-  return journey ? `${journey} ${description}` : description;
+  // The tools that shape a game carry the rule « the engine of the game, its content as data » (data-driven.ts),
+  // before their own description (whose closing credit rule stays last).
+  const rule = DATA_DRIVEN_TOOLS.has(name) && !description.includes(DATA_DRIVEN_RULE) ? DATA_DRIVEN_RULE : '';
+  return [journey, rule, description].filter(Boolean).join(' ');
 }
+const DATA_DRIVEN_TOOLS = new Set(['gripforge_game_project', 'gripforge_gamekit_install', 'gripforge_gamekit_configure', 'gripforge_gamekit_search', 'gripforge_gamekit_deliver', 'gripforge_game_engine', 'gripforge_game_content', 'gripforge_define_game']);
 
+import { DATA_DRIVEN_RULE } from './data-driven.generated.js';
 const enc = (v: unknown) => encodeURIComponent(String(v));
+/** Bevy (the GripForge player) is the target web of the API. */
+export const serverTarget = (t: unknown) => (t === 'bevy' ? 'web' : t);
 
 const HOSTED_DELIVERY_NOTE =
   'This hosted endpoint cannot write into your project: write bundle.files following plan.actions in order, or use npx @gripforgeai/mcp with gripforge_gamekit_deliver_local { project_dir }, or the editor bridge.';
@@ -340,7 +347,7 @@ export function registerGameKitTools(
   tool(
     'gripforge_game_web_export',
     'Prepare a standalone local web game',
-    'Prepare a download manifest for an existing web Game Kit project in the current workspace. Reuses the same player and HUD as hosted play, compiles only installed enabled kit runtimes, and lists the game configuration, static resources and Library assets to download. Does not publish the project or change its visibility. The hosted MCP cannot write local files: use gripforge game-export <project_id> <folder> locally, then npm run dev. The CLI verifies downloads and preserves local edits on updates (--check previews conflicts; --force backs up and replaces edits only when authorized). The delivered versions remain fixed until an explicit export update. Legacy kits and unpublished source overlays cannot be exported. net.* kits still need their online services. 0 credits.',
+    'Not for a local engine project: when the game\'s Godot project already exists on the user\'s machine, do not export it — attach GripForge to it with the CLI, gripforge game-attach <project_id> <project folder> (addon gripforge_kits + game under gripforge/, never its project.godot, scenes or scripts); Unity / Unreal: gripforge_gamekit_deliver in place. A native project\'s answer carries notices [{ code: export_not_needed, howToFix }]: follow it. If game-attach reports manual_setup_found, follow its howToFix before any --force. Prepare a download manifest for an existing Game Kit project in the current workspace. Reuses the same player and HUD as hosted play, compiles only installed enabled kit runtimes, and lists the game configuration, static resources and Library assets to download. Does not publish the project or change its visibility. The hosted MCP cannot write local files: use gripforge game-export <project_id> <folder> locally, then npm run dev. The CLI verifies downloads and preserves local edits on updates (--check previews conflicts; --force backs up and replaces edits only when authorized). The delivered versions remain fixed until an explicit export update. Legacy kits and unpublished source overlays cannot be exported. net.* kits still need their online services. 0 credits.',
     { project_id: projectId },
     { readOnly: false },
     (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/export/web`, body(args), 'POST', extra?.signal),
@@ -354,7 +361,7 @@ export function registerGameKitTools(
       q: schema.string().max(200).optional().describe('Free text matched on id, name, description and tags (e.g. "drive a car", "wanted level").'),
       capability: schema.string().max(120).optional().describe('Capability the kit must provide (exact id or prefix, e.g. vehicle.drive).'),
       tag: schema.string().max(60).optional().describe('Tag filter (e.g. vehicle, mission, npc, legacy).'),
-      target: schema.enum(['web', 'godot', 'unity', 'unreal', 'rust']).optional().describe('Engine target the kit must support (rust: the kits ported to the Rust kit host, which the native player and the Bevy web player run). For game creation, use the engine chosen by the user or identified in their project; ask Unity / Godot / Unreal Engine / GripForge player (web) if unknown. The API web default is not user consent.'),
+      target: schema.enum(['bevy', 'web', 'godot', 'unity', 'unreal', 'rust']).optional().describe('Engine target the kit must support (bevy = the GripForge player, Rust/Bevy, also named web; rust: the kits ported to the Rust kit host, which the native player and the Bevy player run). For game creation, use the engine chosen by the user or identified in their project; ask Bevy (GripForge player) / Godot / Unity / Unreal Engine if unknown. The API web default is not user consent.'),
       project_id: projectId.optional().describe('Game Kit project id (gkp_…) to score results against. Default: the workspace’s most recently updated project.'),
       limit: schema.number().int().min(1).max(100).optional().describe('Max kits returned (default 20).'),
     },
@@ -364,7 +371,7 @@ export function registerGameKitTools(
         q: typeof args.q === 'string' ? args.q : undefined,
         capability: typeof args.capability === 'string' ? args.capability : undefined,
         tag: typeof args.tag === 'string' ? args.tag : undefined,
-        target: typeof args.target === 'string' ? args.target : undefined,
+        target: typeof args.target === 'string' ? String(serverTarget(args.target)) : undefined,
         project: typeof args.project_id === 'string' ? args.project_id : undefined,
         limit: typeof args.limit === 'number' ? args.limit : undefined,
       }),
@@ -501,7 +508,7 @@ export function registerGameKitTools(
       project_id: projectId,
       id: kitId,
       config,
-      patch: schema.record(schema.string(), schema.unknown()).optional().describe('The config as a document, instead of rewriting a whole list: { set: { "<dotted path>": value }, append: { "<path of a list>": [items] }, update: { "<path>": [{ match: { key: value }, set: { … } }] }, remove: { "<path>": [values or { key: value }] } } — add, change or remove one element of a config list (an item with the id of an element replaces it); a list the project does not write starts from the kit default. Validated against the configSchema like config.'),
+      patch: schema.record(schema.string(), schema.unknown()).optional().describe('The config as a document, instead of rewriting a whole list: { set: { "<dotted path>": value }, append: { "<path of a list>": [items] }, update: { "<path>": [{ match: { key: value }, set: { … } }] }, remove: { "<path>": [values or { key: value }] } } — add, change or remove one element of a config list (an item with the id of an element replaces it); remove on an object (a table: audio.core sounds, music.playlists) takes out the keys named, { remove: { sounds: ["music.combat"] } }; a list the project does not write starts from the kit default. Validated against the configSchema like config.'),
       enabled: schema.boolean().optional().describe('false to disable the kit at runtime while keeping it installed; true to re-enable.'),
       confirm: schema.string().max(80).optional().describe('game.engine enabled=false: the confirm token of the previous answer.'),
       reason: schema.string().max(300).optional().describe('One sentence: why you do this, recorded in the project history (required in spirit when you go against the installed-kits rule).'),
@@ -714,7 +721,7 @@ export function registerGameKitTools(
       name: schema.string().min(1).max(120).optional().describe('create: project name.'),
       preset: schema.string().max(80).optional().describe('create: preset id whose default kits are installed (gripforge_gamekit_search returns presets).'),
       kits: schema.record(schema.string(), schema.boolean()).optional().describe('create: explicit kit toggles { "vehicle.driveable": true, … } on top of the preset. Unchecking a required kit fails with toggle_requires. The default kits (ui.menu, input.remap, settings.graphics, ui.prompts, ui.endscreen, save.persistence, audio.core, i18n.text, ui.theme, input.virtualpad, display.fullscreen, asset.preload, asset.cache, ai.navigation on web) are included unless set to false here — only when the user asked for it.'),
-      target: schema.enum(['web', 'godot', 'unity', 'unreal']).optional().describe('create: pass the confirmed engine explicitly (GripForge player=web). Ask the user to choose Unity / Godot / Unreal Engine / GripForge player (web) before creating if unknown. API default web is for compatibility, not an engine choice.'),
+      target: schema.enum(['bevy', 'web', 'godot', 'unity', 'unreal']).optional().describe('create: pass the confirmed engine explicitly (bevy = the GripForge player, Rust/Bevy; web is its former name). Ask the user to choose Bevy (GripForge player) / Godot / Unity / Unreal Engine before creating if unknown, unless their folder already holds an engine project (then that engine; gripforge game-attach <gkp_id> <folder> brings the game into it). API default web is for compatibility, not an engine choice.'),
       bindings: schema.record(schema.string(), schema.string().nullable()).optional().describe('bind: { slot: lib_… | null } — Library item per asset slot declared by the installed kits, null clears. A model bound to a creature slot gets its animations by itself as far as that is free (the answer carries the chain in creatures); see gripforge_gamekit_creatures.'),
       collection: schema.string().max(80).optional().describe('data: collection name declared by an installed kit (e.g. missions, npcs, zones).'),
       documents: schema.array(schema.record(schema.string(), schema.unknown())).max(500).optional().describe('data: documents to upsert (each with its id), validated against the kit schema.'),
@@ -734,7 +741,7 @@ export function registerGameKitTools(
       if (action === 'list') return api('gamekit-projects', args, 'GET', extra?.signal);
       if (action === 'create') {
         if (typeof args.name !== 'string' || !args.name.trim()) return Promise.resolve(fail('create needs name.'));
-        return api('gamekit-projects', body(args, 'bindings', 'collection', 'documents', 'remove', 'replace', 'scheme', 'dry_run', 'force', 'reset'), 'POST', extra?.signal);
+        return api('gamekit-projects', body({ ...args, target: serverTarget(args.target) }, 'bindings', 'collection', 'documents', 'remove', 'replace', 'scheme', 'dry_run', 'force', 'reset'), 'POST', extra?.signal);
       }
       if (typeof args.project_id !== 'string') return Promise.resolve(fail(`${action} needs project_id (gkp_…).`));
       const project = enc(args.project_id);

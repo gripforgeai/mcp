@@ -156,7 +156,7 @@ export function runKit<T = Record<string, unknown>>(kit: Kit, request: Record<st
   });
 }
 
-export interface LodCopy { profile: LodProfile; textures: string; key?: string; file?: string; bytes?: number; sha256?: string; status?: 'made' | 'current' | 'missing'; skipped?: string; ms?: number; levels?: unknown; pushed?: 'adopted' | 'refused' | 'kept'; note?: string }
+export interface LodCopy { profile: LodProfile; textures: string; key?: string; file?: string; bytes?: number; sha256?: string; status?: 'made' | 'current' | 'missing'; skipped?: string; ms?: number; levels?: unknown; vat?: { skipped: string; clips: string[]; frames: number; fps: number; dropped: string[]; bytes: number } | null; pushed?: 'adopted' | 'refused' | 'kept'; note?: string }
 export interface LodBuilt { input: string; kind: string; levels: { ratios: number[] } | null; copies: LodCopy[] }
 
 export interface LodFileOptions {
@@ -300,9 +300,15 @@ export async function lodGame(transport: LodTransport, project: string, o: LodGa
 }
 
 /** Plain-text lines of a report, for the terminal. */
+/** What the baked animation of a copy came to (the `bevy` copy of a skinned model): its clips and images, or why none. */
+function vatNote(c: LodCopy): string {
+  if (!c.vat) return '';
+  if (c.vat.skipped) return ` · animation not baked: ${c.vat.skipped}`;
+  return ` · animation baked: ${c.vat.clips.length} clips, ${c.vat.frames} images at ${c.vat.fps}/s${c.vat.dropped.length ? `, left out: ${c.vat.dropped.join(', ')}` : ''}`;
+}
 export function lodLines(built: LodBuilt): string[] {
   const lines = [`${built.input} (${built.kind}) — ${built.levels ? `levels ${built.levels.ratios.join(' / ')}` : 'no level (the passport says ratios: [])'}`];
-  for (const c of built.copies) lines.push(`  ${c.profile.padEnd(5)} ${c.status ?? 'skipped'}${c.file ? ` ${c.file} (${((c.bytes ?? 0) / 1024).toFixed(0)} KB)` : ''}${c.skipped ? ` ${c.skipped}` : ''}`);
+  for (const c of built.copies) lines.push(`  ${c.profile.padEnd(5)} ${c.status ?? 'skipped'}${c.file ? ` ${c.file} (${((c.bytes ?? 0) / 1024).toFixed(0)} KB)` : ''}${c.skipped ? ` ${c.skipped}` : ''}${vatNote(c)}`);
   return lines;
 }
 export const absolute = (label: string, p: string) => { if (!isAbsolute(p)) throw Error(`${label} must be an absolute path (got ${p}).`); return p; };

@@ -24,6 +24,8 @@ export function creationToolShape(schema: typeof z = z) {
   const shape = creationWriteShape(schema);
   return {
     ...shape,
+    /** bevy = the GripForge player (Rust/Bevy), sent to the server as its target web (toServerEngine). */
+    engine: targetEnum(schema, ['bevy', 'godot', 'unity', 'unreal', 'web']).optional().describe('bevy (the GripForge player: Rust/Bevy, WebGPU + WebGL2), godot, unity or unreal; web is the former name of bevy.'),
     action: schema.enum(['list', 'get', 'assets', ...shape.action.options]),
     workspace_id: schema.string().max(100).optional(),
     other_styles: schema.boolean().optional(), source: schema.enum(['all', 'workspace', 'community']).optional(), q: schema.string().max(100).optional(),
@@ -32,3 +34,8 @@ export function creationToolShape(schema: typeof z = z) {
 
 export const creationWriteRequest = z.object(creationWriteShape()).strict();
 export type CreationCommand = z.infer<typeof creationWriteRequest>;
+
+/** The engine as the server names it: Bevy (the GripForge player) is the target web of the API. */
+export function toServerEngine<T extends { engine?: string }>(body: T): T {
+  return body.engine === 'bevy' ? { ...body, engine: 'web' } : body;
+}
