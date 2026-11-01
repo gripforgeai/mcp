@@ -131,8 +131,11 @@ export async function ensureLodKit(opts: KitOptions = {}): Promise<Kit> {
 /** sharp (the texture encoders) and basisu (KTX2) beside the kit: `npm install`, no install script runs. */
 function installDeps(dir: string, log: (line: string) => void) {
   log('Installing the texture encoders (sharp, basisu) of the LOD kit…');
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const r = spawnSync(npm, ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: dir, encoding: 'utf8', timeout: 600_000 });
+  const win = process.platform === 'win32';
+  // Windows: npm is a .cmd, which Node (18.20.2, 20.12.2 and later, CVE-2024-27980) only starts through the shell —
+  // spawnSync('npm.cmd') without it fails at once with EINVAL. The arguments are fixed here: nothing to escape.
+  const npm = win ? 'npm.cmd' : 'npm';
+  const r = spawnSync(npm, ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: dir, encoding: 'utf8', timeout: 600_000, shell: win });
   if (r.status !== 0) throw Error(`npm install failed in the LOD kit (${dir}): ${(r.stderr || r.error?.message || '').toString().slice(0, 400)}`);
 }
 

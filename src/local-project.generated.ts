@@ -16,7 +16,9 @@ export const apiEngine = (engine: string) => (engine === 'bevy' ? 'web' : engine
  * Rust crate using Bevy), `gripforge` a GripForge Bevy game made by game-export (its web lock). `lock` is the file in
  * which an earlier attachment remembers its game; `game` that game (gkp_…) when there is one.
  */
-export interface LocalProject { dir: string; engine: Engine; kind: 'own' | 'gripforge'; lock: string; game?: string }
+export interface LocalProject { dir: string; engine: Engine; kind: 'own' | 'gripforge'; lock: string; game?: string; /** Attached to the prebuilt native player (game-attach --native). */ native?: boolean }
+/** The lock of a Bevy game attached to the native player (game-attach --engine bevy --native, game-export --target desktop). */
+export const DESKTOP_LOCK = '.gripforge/desktop.lock.json';
 
 const LOCKS: Record<Engine, string> = { godot: '.gripforge/godot.lock.json', unity: '.gripforge/unity.lock.json', unreal: '.gripforge/unreal.lock.json', bevy: '.gripforge/web.lock.json' };
 
@@ -34,12 +36,15 @@ export async function detectLocalProject(folder: string): Promise<LocalProject |
   if (entries.includes('project.godot')) engine = 'godot';
   else if (existsSync(join(dir, 'ProjectSettings', 'ProjectVersion.txt'))) engine = 'unity';
   else if (entries.some((f) => f.endsWith('.uproject'))) engine = 'unreal';
-  else if (existsSync(join(dir, LOCKS.bevy)) || (entries.includes('game.json') && entries.includes('runtime-rust'))) { engine = 'bevy'; kind = 'gripforge'; }
+  else if (existsSync(join(dir, LOCKS.bevy)) || existsSync(join(dir, DESKTOP_LOCK)) || (entries.includes('game.json') && entries.includes('runtime-rust'))) { engine = 'bevy'; kind = 'gripforge'; }
   else if (entries.includes('Cargo.toml') && /^\s*bevy\b|\bbevy\s*=|"bevy"/m.test(await readFile(join(dir, 'Cargo.toml'), 'utf8').catch(() => ''))) engine = 'bevy';
   if (!engine) return null;
   // A Bevy crate of the user: its game lives in gripforge/ (a GripForge Bevy game), so its lock is there.
+  const base = engine === 'bevy' && kind === 'own' ? join(dir, 'gripforge') : dir;
   const lock = engine === 'bevy' && kind === 'own' ? `gripforge/${LOCKS.bevy}` : LOCKS[engine];
-  return { dir, engine, kind, lock, game: await lockGame(dir, lock) };
+  // A Bevy game attached to the native player remembers its game in the desktop lock.
+  const game = await lockGame(dir, lock) ?? (engine === 'bevy' ? await lockGame(base, DESKTOP_LOCK) : undefined);
+  return { dir, engine, kind, lock, game, native: engine === 'bevy' && existsSync(join(base, DESKTOP_LOCK)) };
 }
 
 /** A folder whose package.json uses three.js: not an engine of GripForge (Bevy, the GripForge player, takes its place). */
