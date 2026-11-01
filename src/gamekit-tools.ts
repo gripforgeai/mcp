@@ -107,14 +107,14 @@ export const TOOL_JOURNEY: Record<string, string> = {
 /** The tool's place in the journey, then its description (whose closing credit rule stays last). */
 function withJourney(name: string, description: string): string {
   const journey = TOOL_JOURNEY[name];
-  // The tools that shape a game carry the rule « the engine of the game, its content as data » (data-driven.ts),
+  // The tools that shape a game carry the rule « the engine of the game, its content as data » in one sentence (data-driven.ts),
   // before their own description (whose closing credit rule stays last).
-  const rule = DATA_DRIVEN_TOOLS.has(name) && !description.includes(DATA_DRIVEN_RULE) ? DATA_DRIVEN_RULE : '';
+  const rule = DATA_DRIVEN_TOOLS.has(name) && !description.includes(DATA_DRIVEN_HINT) ? DATA_DRIVEN_HINT : '';
   return [journey, rule, description].filter(Boolean).join(' ');
 }
 const DATA_DRIVEN_TOOLS = new Set(['gripforge_game_project', 'gripforge_gamekit_install', 'gripforge_gamekit_configure', 'gripforge_gamekit_search', 'gripforge_gamekit_deliver', 'gripforge_game_engine', 'gripforge_game_content', 'gripforge_define_game']);
 
-import { DATA_DRIVEN_RULE } from './data-driven.generated.js';
+import { DATA_DRIVEN_HINT } from './data-driven.generated.js';
 const enc = (v: unknown) => encodeURIComponent(String(v));
 /** Bevy (the GripForge player) is the target web of the API. */
 export const serverTarget = (t: unknown) => (t === 'bevy' ? 'web' : t);

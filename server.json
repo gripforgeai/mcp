@@ -17,7 +17,7 @@
     "url": "https://github.com/gripforgeai/mcp",
     "source": "github"
   },
-  "version": "0.1.158",
+  "version": "0.1.159",
   "remotes": [
     {
       "type": "streamable-http",
@@ -35,7 +35,7 @@
   "packages": [
     {
       "identifier": "@gripforgeai/mcp",
-      "version": "0.1.158",
+      "version": "0.1.159",
       "transport": {
         "type": "stdio"
       },
