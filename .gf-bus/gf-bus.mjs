@@ -3,6 +3,7 @@
 // Fichier unique, sans dépendance, Node >= 22 (WebSocket natif pour wss://).
 // Usage complet : USAGE.md à côté de ce fichier.
 import net from 'node:net';
+import http from 'node:http';
 import tls from 'node:tls';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -803,8 +804,8 @@ export function resolveAgent(P, creds, { asAgent, hook, tool, cwd, forStart, env
 
 // ---------------------------------------------------------------- saisie terminal
 let stdinLines = null;
-async function prompt(q, { mask = false, def } = {}) {
-  process.stdout.write(`${q}${def ? ` [${def}]` : ''} : `);
+async function prompt(q, { mask = false, def, enter = false } = {}) {
+  process.stdout.write(enter ? `${q}. ` : `${q}${def ? ` [${def}]` : ''} : `);
   const stdin = process.stdin;
   if (!stdin.isTTY) {
     if (!stdinLines) { const chunks = []; for await (const c of stdin) chunks.push(c); stdinLines = Buffer.concat(chunks).toString('utf8').split(/\r?\n/); }
@@ -835,6 +836,170 @@ async function readStdin(ms) {
     process.stdin.on('end', () => { clearTimeout(t); res(Buffer.concat(chunks).toString('utf8')); });
     process.stdin.on('error', () => { clearTimeout(t); res(''); });
   });
+}
+
+// ---------------------------------------------------------------- connexion graphique / web (sans terminal)
+// Le mot de passe ne passe jamais par un argument de ligne de commande : il sort du dialogue par un pipe (stdout du
+// processus enfant, lu en mémoire) ou arrive par le POST de la page locale. Il n'est jamais écrit sur stdout ni dans un log.
+const LOGIN_TTL = 10 * 60 * 1000;
+const TITLE = 'Connexion au bus GripForge';
+
+// Commande qui ouvre une fenêtre de terminal lançant « run login » : { cmd, args, opts } ou null (pas de terminal possible).
+export function terminalCommand({ platform = process.platform, env = process.env, has = which, run = RUN } = {}) {
+  if (env.SSH_CONNECTION || env.SSH_TTY || env.SSH_CLIENT) return null;
+  if (platform === 'darwin') {
+    const q = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const sh = `'${String(run).replace(/'/g, `'\\''`)}' login`;
+    return has('osascript') ? { cmd: 'osascript', args: ['-e', 'tell application "Terminal" to activate', '-e', `tell application "Terminal" to do script "${q(sh)}"`] } : null;
+  }
+  if (platform === 'win32') return { cmd: 'cmd', args: ['/c', 'start', `"${TITLE}"`, 'cmd', '/k', `""${run}" login"`], opts: { windowsVerbatimArguments: true } };
+  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return null;
+  if (has('x-terminal-emulator')) return { cmd: 'x-terminal-emulator', args: ['-T', TITLE, '-e', run, 'login'] };
+  if (has('xfce4-terminal')) return { cmd: 'xfce4-terminal', args: ['--title', TITLE, '-x', run, 'login'] };
+  if (has('gnome-terminal')) return { cmd: 'gnome-terminal', args: ['--title', TITLE, '--', run, 'login'] };
+  if (has('konsole')) return { cmd: 'konsole', args: ['-p', `tabtitle=${TITLE}`, '-e', run, 'login'] };
+  if (has('xterm')) return { cmd: 'xterm', args: ['-T', TITLE, '-e', run, 'login'] };
+  return null;
+}
+
+// Méthode de saisie : 'terminal' (ce terminal), 'window' (nouvelle fenêtre de terminal), 'none' (consigne texte). Jamais de navigateur automatique.
+export function chooseLoginMethod({ platform = process.platform, env = process.env, isTTY = false, gui = false, has = which } = {}) {
+  if (isTTY && !gui) return 'terminal';
+  return terminalCommand({ platform, env, has }) ? 'window' : 'none';
+}
+
+const htmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function loginPage(token, { login = '', error = '', done = false } = {}) {
+  const body = done ? '<p>Connecté au bus GripForge. Tu peux fermer cet onglet.</p>' : `${error ? `<p style="color:#b00">${htmlEsc(error)}</p>` : ''}
+<form method="post" action="/login?t=${htmlEsc(token)}" autocomplete="off">
+<p><label>Login<br><input name="login" value="${htmlEsc(login)}" required autofocus></label></p>
+<p><label>Mot de passe<br><input name="password" type="password" required></label></p>
+<p><button type="submit">Se connecter</button></p></form>`;
+  return `<!doctype html><meta charset="utf-8"><title>Bus GripForge</title><body style="font:16px system-ui;max-width:24em;margin:3em auto"><h1>Bus des agents GripForge</h1>${body}`;
+}
+
+// Mini serveur web local (127.0.0.1 seulement, jeton à usage unique, fermé après succès ou délai).
+// verify({login,password}) -> '' si accepté, sinon message d'erreur.
+export function startLoginServer({ verify, login = '', ttl = LOGIN_TTL, token = crypto.randomBytes(24).toString('hex') }) {
+  let attempts = 0, used = false, port = 0, closed = false, timer = null;
+  const tokOk = (t) => { const a = Buffer.from(String(t || '')), b = Buffer.from(token); return a.length === b.length && crypto.timingSafeEqual(a, b); };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const send = (code, html) => { res.writeHead(code, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'", 'x-frame-options': 'DENY' }); res.end(html); };
+    const hostOk = req.headers.host === `127.0.0.1:${port}`;
+    if (!hostOk || u.pathname !== '/login' || used || !tokOk(u.searchParams.get('t'))) return send(404, '<!doctype html><meta charset="utf-8"><p>Lien invalide ou déjà utilisé.</p>');
+    if (req.method === 'GET') return send(200, loginPage(token, { login }));
+    if (req.method !== 'POST') return send(405, 'méthode refusée');
+    let raw = '', big = false;
+    req.on('data', (d) => { raw += d; if (raw.length > 4096) { big = true; req.destroy(); } });
+    req.on('end', async () => {
+      if (big) return;
+      const f = new URLSearchParams(raw);
+      const lg = (f.get('login') || '').trim(), pw = f.get('password') || '';
+      if (!LOGIN_RE.test(lg) || !pw) return send(200, loginPage(token, { login: lg, error: 'Login ou mot de passe invalide.' }));
+      if (++attempts > 5) { send(429, 'Trop d\'essais.'); return close(); }
+      const err = await verify({ login: lg, password: pw });
+      if (err) return send(200, loginPage(token, { login: lg, error: err }));
+      used = true;
+      send(200, loginPage(token, { done: true }));
+      setTimeout(close, 200);
+    });
+  });
+  const close = () => { if (closed) return; closed = true; clearTimeout(timer); server.close(); server.closeAllConnections?.(); };
+  const ready = new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => { port = server.address().port; timer = setTimeout(close, ttl); timer.unref?.(); resolve({ port, url: `http://127.0.0.1:${port}/login?t=${token}`, close, closed: new Promise((r) => server.once('close', r)) }); });
+  });
+  return ready;
+}
+
+function openBrowser(url) {
+  if (process.env.GF_BUS_NO_OPEN) return;
+  const [cmd, args] = IS_WIN ? ['rundll32', ['url.dll,FileProtocolHandler', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try { const c = spawn(cmd, args, { stdio: 'ignore', detached: true }); c.on('error', () => {}); c.unref(); } catch {}
+}
+
+// Enregistre après essai de connexion ; renvoie '' si OK, sinon le message d'erreur.
+async function completeLogin(P, { url, login, password }) {
+  const r = await testConnect({ url, login, password });
+  if (r !== 'ok') return r === 'refused' ? 'Identifiants refusés par le broker : rien enregistré.' : `Connexion impossible (${r}) : rien enregistré.`;
+  saveCreds(P, { url, login, password });
+  if (await rpc(P, { op: 'hello' }, 800).catch(() => null)) await rpc(P, { op: 'reload' }, 20000).catch(() => {});
+  return '';
+}
+
+// Verrou machine (une seule fenêtre à la fois) et délai après fermeture par l'utilisateur.
+const lockFile = (P) => path.join(P.state, 'login-gui.lock');
+const linkFile = (P) => path.join(P.state, 'login-gui.link');
+export function lockHeld(P) {
+  try { const pid = Number(fs.readFileSync(lockFile(P), 'utf8')); if (pid && alive(pid)) return true; } catch {}
+  return false;
+}
+export function takeLock(P, pid = process.pid) {
+  fs.mkdirSync(P.state, { recursive: true });
+  for (let i = 0; i < 2; i++) {
+    try { fs.writeFileSync(lockFile(P), String(pid), { flag: 'wx', mode: 0o600 }); return true; } catch { if (lockHeld(P)) return false; try { fs.rmSync(lockFile(P), { force: true }); } catch {} }
+  }
+  return false;
+}
+
+// Ouvre la fenêtre de terminal (détachée). Renvoie le pid du lanceur, ou null.
+function openTerminalWindow(P) {
+  const tc = terminalCommand();
+  if (!tc) return null;
+  try {
+    const c = spawn(tc.cmd, tc.args, { stdio: 'ignore', detached: true, ...(tc.opts || {}) });
+    c.on('error', () => {}); c.unref();
+    return c.pid || null;
+  } catch { return null; }
+}
+
+// Repli : page web locale, jusqu'au succès ou 10 min.
+async function guiLogin(P, o) {
+  const background = false;
+  const old = readCredFile(P) || {};
+  const url = o.url || process.env.GF_BUS_URL || old.url || DEFAULT_URL;
+  let finish; const won = new Promise((r) => { finish = r; });
+  const srv = await startLoginServer({ login: old.login || '', verify: async (c) => { const e = await completeLogin(P, { url, ...c }); if (!e) finish(true); return e; } });
+  fs.mkdirSync(P.state, { recursive: true });
+  fs.writeFileSync(linkFile(P), srv.url, { mode: 0o600 });
+  if (!background) say(`Pas de terminal possible ici : ouvre ${srv.url}`);
+  openBrowser(srv.url);
+  const ok = await Promise.race([won, srv.closed.then(() => false)]);
+  srv.close();
+  for (const f of [linkFile(P), lockFile(P)]) try { fs.rmSync(f, { force: true }); } catch {}
+  if (ok) { if (!background) say('Connecté. Identifiants enregistrés pour toute la machine.'); return 0; }
+  if (!background) say('Connexion non terminée : rien enregistré.');
+  return 1;
+}
+
+// Connexion sans terminal : ouvre une fenêtre de terminal ; sinon consigne texte. Ne demande jamais rien dans le chat.
+async function windowLogin(P) {
+  if (chooseLoginMethod({ isTTY: false, gui: true }) === 'window') {
+    if (lockHeld(P)) { say(`Une fenêtre « ${TITLE} » est déjà ouverte : saisis-y tes identifiants.`); return 0; }
+    if (takeLock(P)) {
+      const pid = openTerminalWindow(P);
+      if (pid) { try { fs.writeFileSync(lockFile(P), String(pid), { mode: 0o600 }); } catch {} say(`Une fenêtre de terminal « ${TITLE} » vient de s'ouvrir : saisis-y tes identifiants.`); return 0; }
+      try { fs.rmSync(lockFile(P), { force: true }); } catch {}
+    }
+  }
+  say(`Pas de terminal possible ici : lance \`${RUN} login\` dans un terminal.`);
+  return 1;
+}
+
+// SessionStart sans identifiants : ouvre une fenêtre de terminal (sinon la page web) sans bloquer le hook, et renvoie le texte pour l'agent.
+async function loginHookText(P, why) {
+  const term = `${RUN} login`;
+  const base = `${why} Ne demande jamais le mot de passe dans le chat.`;
+  if (process.env.GF_BUS_NO_GUI || chooseLoginMethod({ isTTY: false, gui: true }) !== 'window') return `${base} Demande à l'utilisateur de lancer dans un terminal : ${term}`;
+  let opened = lockHeld(P);
+  if (!opened && takeLock(P)) {
+    const pid = openTerminalWindow(P);
+    if (pid) { try { fs.writeFileSync(lockFile(P), String(pid), { mode: 0o600 }); } catch {} opened = true; }
+    else try { fs.rmSync(lockFile(P), { force: true }); } catch {}
+  }
+  if (!opened) return `${base} Lance \`${term}\` dans un terminal.`;
+  return `${base} Une fenêtre de terminal « ${TITLE} » vient de s'ouvrir pour te connecter ; sinon lance \`${term}\` dans un terminal.`;
 }
 
 // ---------------------------------------------------------------- commandes
@@ -901,9 +1066,8 @@ async function cmdHook(P, o) {
   const tool = o.tool || 'claude';
   const creds = loadCreds(P);
   if (ev === 'SessionStart') {
-    if (!creds) return say(notConnected());
-    const af = authFailedNote(P);
-    if (af) return say(af);
+    if (!creds) return say(await loginHookText(P, 'Bus des agents non connecté.'));
+    if (fs.existsSync(P.authFailed)) return say(await loginHookText(P, 'Bus des agents : identifiants refusés par le broker.'));
     const res = await declare(P, creds, { ...o, tool }, h);
     if (!res.ok) return say(`gf-bus : ${res.error}`);
     if (process.env.CLAUDE_ENV_FILE) try { fs.appendFileSync(process.env.CLAUDE_ENV_FILE, `export GF_BUS_AGENT=${res.agent}\n`); } catch {}
@@ -922,18 +1086,35 @@ async function cmdHook(P, o) {
 }
 
 async function cmdLogin(P, o) {
-  if (!process.stdin.isTTY && !o.stdin) { say(`gf-bus login demande un terminal (mot de passe masqué). Lance-le dans un terminal : ${RUN} login`); return 1; }
+  if (o.web) return await guiLogin(P, o);
+  if (!o.stdin && chooseLoginMethod({ isTTY: !!process.stdin.isTTY, gui: !!o.gui }) !== 'terminal') {
+    if (process.env.GF_BUS_NO_GUI) { say(`gf-bus login demande un terminal (mot de passe masqué). Lance-le dans un terminal : ${RUN} login`); return 1; }
+    return await windowLogin(P);
+  }
   const old = readCredFile(P) || {};
-  const url = o.url || (await prompt('Adresse du broker', { def: old.url || process.env.GF_BUS_URL || DEFAULT_URL }));
-  const login = await prompt('Login', { def: old.login });
-  if (!LOGIN_RE.test(login)) { say('login invalide'); return 1; }
-  const password = await prompt('Mot de passe', { mask: true });
-  if (!password) { say('mot de passe vide'); return 1; }
-  const r = await testConnect({ url, login, password });
-  if (r !== 'ok') { say(r === 'refused' ? 'Identifiants refusés par le broker : rien enregistré.' : `Connexion impossible (${r}) : rien enregistré.`); return 1; }
-  saveCreds(P, { url, login, password });
-  const st = readCredFile(P)?.store;
-  say(`Connecté. Identifiants enregistrés pour toute la machine (${st === 'keychain' ? 'trousseau du système' : P.creds + ', droits 600'}).`);
+  const url = o.url || process.env.GF_BUS_URL || old.url || DEFAULT_URL;
+  const tty = !!process.stdin.isTTY;
+  if (tty) { // la fenêtre de saisie tient le verrou « une seule fenêtre à la fois » tant qu'elle vit
+    try { fs.mkdirSync(P.state, { recursive: true }); fs.writeFileSync(lockFile(P), String(process.pid), { mode: 0o600 }); } catch {}
+    process.on('exit', () => { try { if (fs.readFileSync(lockFile(P), 'utf8') === String(process.pid)) fs.rmSync(lockFile(P), { force: true }); } catch {} });
+  }
+  if (tty) say('Connexion au bus des agents GripForge (gf-bus)');
+  const reason = (r) => (r === 'refused' ? 'identifiants refusés par le broker' : `connexion impossible (${r})`);
+  for (;;) {
+    const login = await prompt('Votre login gf-bus');
+    const password = LOGIN_RE.test(login) ? await prompt('Votre mot de passe gf-bus', { mask: true }) : '';
+    let err = !LOGIN_RE.test(login) ? 'login invalide' : !password ? 'mot de passe vide' : '';
+    if (!err) {
+      say('Test de la connexion…');
+      const r = await testConnect({ url, login, password });
+      if (r === 'ok') { saveCreds(P, { url, login, password }); break; }
+      err = reason(r);
+    }
+    say(`Échec : ${err} — réessayez.`);
+    if (!tty) return 1;
+  }
+  say('Connexion réussie, identifiants enregistrés.');
+  if (tty) { await prompt('Appuyez sur Entrée pour continuer', { enter: true }); }
   if (await rpc(P, { op: 'hello' }, 800).catch(() => null)) await rpc(P, { op: 'reload' }, 20000).catch(() => {});
   return 0;
 }
@@ -994,7 +1175,7 @@ async function cmdReq(creds, o) {
 }
 
 const HELP = `gf-bus ${VERSION} — bus des agents GripForge (mode d'emploi : USAGE.md)
-  login                         identifiants une fois par machine (terminal, mot de passe masqué)
+  login [--gui|--web]           identifiants une fois par machine (terminal ; sans terminal ou --gui : ouvre une fenêtre de terminal ; --web : page web locale, seulement sur demande)
   start [--work S] [--tool T]   lance le démon si besoin et déclare l'agent de la session
   who                           agents en ligne
   send <login/agent|work:S|chan:N> <texte> [--kind info|question|request|answer]
