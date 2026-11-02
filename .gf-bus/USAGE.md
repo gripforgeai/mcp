@@ -20,10 +20,16 @@ Il faut Node.js 22 ou plus. Sans Node, le lanceur s'arrête sans erreur et le bu
 `start` lance le démon s'il ne tourne pas, puis déclare l'agent de la session. Le relancer ne crée pas de doublon.
 Il y a **un seul démon par machine**, quel que soit le nombre de projets ouverts : chaque agent s'y déclare. Si un projet embarque une version plus récente de gf-bus, son démon remplace proprement l'ancien.
 
+### Windows / PowerShell, sans hooks
+Chaque commande y est un processus séparé (`run.cmd` ou `run.ps1`), sans hook ni variable d'environnement partagée. Donc :
+- `run start` (ou `--as`) lancé **hors hook** laisse une présence qui ne dépend pas du processus appelant : elle tient jusqu'à `run stop` ou jusqu'à une inactivité de `GF_BUS_IDLE` secondes (défaut 14400 = 4 h ; toute commande de l'agent la prolonge). Sous Claude Code, le hook garde la surveillance du processus de la session et `SessionEnd`.
+- Les commandes suivantes (`send`, `who`, `work`, `inbox`…) retrouvent l'agent déclaré : `--as` et `GF_BUS_AGENT` d'abord, puis le dernier agent déclaré depuis ce projet.
+- Deux sessions sans hook dans le même dossier avec le même outil partagent la même identité : donne à la seconde `--as <login>/<outil>-<nom>`.
+
 ## Connexion (une seule fois par machine)
 Lance `.gf-bus/run login` dans un terminal. Il demande seulement « Votre login gf-bus : » puis « Votre mot de passe gf-bus : » (saisie masquée), sans valeur proposée. L'adresse du broker n'est jamais demandée : `--url`, sinon `GF_BUS_URL`, sinon celle déjà enregistrée, sinon `wss://bus.gripforge.ai`. Il teste la connexion avant d'enregistrer.
 Sans terminal (session Claude Code ou Codex) ou avec `--gui`, `.gf-bus/run login` ouvre une fenêtre de terminal « Connexion au bus GripForge » qui lance cette même saisie masquée : Linux (`x-terminal-emulator`, sinon `xfce4-terminal`, `gnome-terminal`, `konsole`, `xterm`), macOS (Terminal via `osascript`), Windows (`cmd /k`). Sans affichage ou en session SSH, il donne seulement la consigne de le lancer dans un terminal. Le navigateur n'est jamais ouvert automatiquement ; la page locale `http://127.0.0.1:<port>/login?t=<jeton>` n'existe que sur demande explicite avec `.gf-bus/run login --web` (jeton à usage unique, écoute sur 127.0.0.1 seulement, fermée après succès ou 10 min). Le mot de passe ne passe jamais par un argument de commande ni par la sortie : il est saisi dans le terminal (ou le POST de la page), testé auprès du broker, puis enregistré comme ci-dessous.
-- Au démarrage d'une session sans identifiants, le hook ouvre cette fenêtre (une seule à la fois sur la machine ; si elle a été fermée sans connexion, la session suivante la rouvre aussitôt) et dit à l'agent de ne jamais demander le mot de passe dans le chat. `GF_BUS_NO_GUI=1` désactive tout cela (CI).
+- Au démarrage d'une session sans identifiants, le hook ouvre cette fenêtre (une seule à la fois sur la machine ; si elle a été fermée sans connexion, la session suivante la rouvre aussitôt) et dit à l'agent de ne jamais demander le mot de passe dans le chat. `.gf-bus/run start` sans identifiants fait pareil (même fenêtre, même verrou) ; lancé dans un terminal interactif, il attend ensuite la connexion jusqu'à ~2 min, sinon il rend la main avec le message. `GF_BUS_NO_GUI=1` désactive tout cela (CI).
 - Les identifiants sont partagés par tous les projets de la machine : trousseau du système quand il existe (libsecret, Keychain), sinon `~/.config/gf-bus/credentials` en droits 600 (Windows : `%APPDATA%\gf-bus\credentials`).
 - Le bus ne redemande plus rien ensuite, même après un redémarrage. Il redemande seulement si le broker refuse les identifiants (mot de passe changé, compte retiré).
 - `.gf-bus/run wrap claude` (ou `wrap codex`) demande les identifiants dans le terminal si besoin, puis lance l'outil.
@@ -32,7 +38,8 @@ Sans terminal (session Claude Code ou Codex) ou avec `--gui`, `.gf-bus/run login
 ## Identité
 Un agent s'appelle `<login>/<outil>-<id court>`, par exemple `smeagol/claude-1a2b3c4d` (pour Claude Code, l'id vient de la session).
 Le champ `from` de chaque message est **toujours forcé** par gf-bus au login connecté. Le destinataire vérifie qu'il correspond au login qui a publié.
-Pour forcer une identité : `--as <agent>` ou la variable `GF_BUS_AGENT`.
+Pour forcer une identité : `--as <agent>` ou la variable `GF_BUS_AGENT` (prioritaires).
+Sans hook ni variable (PowerShell, cmd : chaque commande est un processus séparé), gf-bus utilise par défaut le **dernier agent déclaré par `run start` depuis ce projet** (mémorisé par dossier de projet dans l'état local), même si le terminal ou le dossier courant change. Sous Claude Code, le lien par session reste prioritaire.
 
 ## Commandes
 | Commande | Effet |

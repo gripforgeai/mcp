@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 export const DEFAULT_URL = 'wss://bus.gripforge.ai';
 export const KINDS = ['info', 'question', 'request', 'answer'];
 const IS_WIN = process.platform === 'win32';
@@ -546,7 +546,7 @@ export class Daemon {
     m.start();
   }
   saveAgents() {
-    writeJson(this.P.agentsFile, [...this.agents.values()].map((a) => ({ agent: a.id, tool: a.info.tool, pid: a.pid, dir: a.info.dir, repo: a.info.repo, branch: a.info.branch, work: a.info.work, role: a.info.role, chans: a.chans, since: a.info.since })));
+    writeJson(this.P.agentsFile, [...this.agents.values()].map((a) => ({ agent: a.id, tool: a.info.tool, pid: a.pid, dir: a.info.dir, repo: a.info.repo, branch: a.info.branch, work: a.info.work, role: a.info.role, chans: a.chans, since: a.info.since, idleMs: a.idleMs })));
   }
   async publishPresence(a) { if (a.client.connected) await withTimeout(a.client.publish(T.presence(a.login, a.tid), JSON.stringify(a.info), { retain: true }), 3000); }
   onAgentMsg(a, topic, payload) {
@@ -565,7 +565,9 @@ export class Daemon {
     if (sa.login !== this.creds.login) return { ok: false, error: `l'agent ${id} n'appartient pas au login ${this.creds.login}` };
     let a = this.agents.get(id);
     if (a) {
-      if (req.pid) a.pid = req.pid;
+      if (req.pid) { a.pid = req.pid; a.idleMs = 0; }
+      if (req.idleMs) { a.pid = null; a.idleMs = req.idleMs; }
+      a.touched = Date.now();
       for (const k of ['dir', 'repo', 'branch']) if (req[k]) a.info[k] = req[k];
       if (req.role !== undefined && req.role !== a.info.role) await this.setRole(a, req.role);
       if (req.work !== undefined && req.work !== a.info.work) await this.setWork(a, req.work);
@@ -575,7 +577,7 @@ export class Daemon {
     }
     const chans = req.chans || loadChannels(this.P, this.env);
     a = {
-      id, login: sa.login, tid: sa.tid, pid: req.pid || null, chans,
+      id, login: sa.login, tid: sa.tid, pid: req.pid || null, idleMs: req.pid ? 0 : (req.idleMs || 0), touched: Date.now(), chans,
       info: { agent: id, login: sa.login, tool: req.tool || 'autre', machine: os.hostname(), dir: req.dir || '', repo: req.repo || '', branch: req.branch || '', work: req.work || null, role: req.role || null, since: req.since || new Date().toISOString(), version: VERSION },
       inbox: new Inbox(agentDir(this.P, id)),
     };
@@ -595,6 +597,7 @@ export class Daemon {
     const connected = await a.client.waitConnected(5000);
     for (let i = 0; i < 20 && !this.monitorReady; i++) await sleep(100);
     if (connected) await sleep(150); // laisse arriver les messages en attente
+    a.touched = Date.now();
     dlog(this.P, `agent déclaré ${id} (pid ${a.pid}, connecté=${connected})`);
     return { ok: true, agent: id, connected, work: a.info.work, role: a.info.role, error: connected ? undefined : (a.client.authFailed ? 'identifiants refusés' : a.client.lastError || 'broker injoignable') };
   }
@@ -708,7 +711,7 @@ export class Daemon {
       case 'hello': return { ok: true, version: VERSION, pid: process.pid, login: this.creds?.login, agents: this.agents.size };
       case 'register': return this.register(req);
       case 'unregister': return this.unregister(req.agent, req.why);
-      case 'work': { const a = this.agents.get(req.agent); if (!a) return { ok: false, error: 'agent non déclaré' }; await this.setWork(a, req.work); return { ok: true, work: a.info.work }; }
+      case 'work': { const a = this.agents.get(req.agent); if (!a) return { ok: false, error: 'agent non déclaré' }; a.touched = Date.now(); await this.setWork(a, req.work); return { ok: true, work: a.info.work }; }
       case 'send': return this.send(req);
       case 'review': return this.review(req);
       case 'reviews': return { ok: true, reviews: [...this.reviews.values()] };
@@ -717,7 +720,7 @@ export class Daemon {
       case 'status': return { ok: true, version: VERSION, pid: process.pid, url: this.creds?.url, login: this.creds?.login, monitor: !!this.monitor?.connected, agents: [...this.agents.values()].map((a) => ({ agent: a.id, pid: a.pid, connected: a.client.connected, work: a.info.work })) };
       case 'reload': {
         this.loadCreds(); this.startMonitor();
-        const saved = [...this.agents.values()].map((a) => ({ agent: a.id, tool: a.info.tool, pid: a.pid, dir: a.info.dir, repo: a.info.repo, branch: a.info.branch, work: a.info.work, role: a.info.role, chans: a.chans, since: a.info.since }));
+        const saved = [...this.agents.values()].map((a) => ({ agent: a.id, tool: a.info.tool, pid: a.pid, dir: a.info.dir, repo: a.info.repo, branch: a.info.branch, work: a.info.work, role: a.info.role, chans: a.chans, since: a.info.since, idleMs: a.idleMs }));
         for (const a of this.agents.values()) await a.client.end();
         this.agents.clear();
         for (const s of saved) await this.register(s, true);
@@ -729,7 +732,11 @@ export class Daemon {
     }
   }
   async tick() {
-    for (const a of [...this.agents.values()]) if (a.pid && !alive(a.pid)) await this.unregister(a.id, '(processus terminé)');
+    const sess = this.agents.size ? readJson(this.P.sessions, {}) : {};
+    for (const a of [...this.agents.values()]) {
+      if (a.pid && !alive(a.pid)) await this.unregister(a.id, '(processus terminé)');
+      else if (!a.pid && a.idleMs && Date.now() - Math.max(a.touched || 0, sess[a.id]?.ts || 0) > a.idleMs) await this.unregister(a.id, '(inactif)');
+    }
     if (!this.agents.size && Date.now() - this.idleSince > 30 * 60e3) await this.shutdown(true, 'inactif');
   }
   // clear=true : retire les présences (arrêt). Mise à niveau : on garde présences et liste d'agents pour le successeur.
@@ -786,6 +793,8 @@ export async function ensureDaemon(P) {
 // ---------------------------------------------------------------- sessions (agent <-> processus)
 function readSessions(P) { return readJson(P.sessions, {}); }
 function writeSession(P, agent, s) { const all = readSessions(P); all[agent] = { ...s, ts: Date.now() }; for (const [k, v] of Object.entries(all)) if (Date.now() - v.ts > 30 * 864e5) delete all[k]; writeJson(P.sessions, all); }
+export function idleSeconds(env = process.env) { const n = Number(env.GF_BUS_IDLE); return n > 0 ? n : 14400; }
+export function projectRoot() { let d = path.dirname(path.dirname(fileURLToPath(import.meta.url))); try { d = fs.realpathSync(d); } catch {} return process.platform === 'win32' ? d.toLowerCase() : d; }
 export function resolveAgent(P, creds, { asAgent, hook, tool, cwd, forStart, env = process.env } = {}) {
   if (asAgent) return { agent: asAgent, tool: tool || guessTool(env) };
   if (hook?.session_id) { const t = tool || 'claude'; return { agent: `${creds.login}/${t}-${String(hook.session_id).replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`, tool: t }; }
@@ -795,8 +804,10 @@ export function resolveAgent(P, creds, { asAgent, hook, tool, cwd, forStart, env
   const byPid = sess.find(([, s]) => s.pid === owner);
   if (byPid) return { agent: byPid[0], tool: byPid[1].tool, pid: owner };
   const t = tool || guessTool(env);
+  const proj = projectRoot();
+  const byProject = () => sess.filter(([, s]) => s.project === proj).sort((x, y) => y[1].ts - x[1].ts); // commandes sans hook ni variable (PowerShell) : dernier agent déclaré depuis ce projet
   const byCwd = sess.filter(([, s]) => s.cwd === cwd && s.tool === t).sort((x, y) => y[1].ts - x[1].ts);
-  if (!forStart) return byCwd.length ? { agent: byCwd[0][0], tool: t } : null;
+  if (!forStart) { if (byCwd.length) return { agent: byCwd[0][0], tool: t }; const bp = byProject(); return bp.length ? { agent: bp[0][0], tool: bp[0][1].tool } : null; }
   const reuse = byCwd.find(([, s]) => !s.pid || !alive(s.pid)); // reprise : même identité, messages en attente remis
   if (reuse) return { agent: reuse[0], tool: t, pid: owner };
   return { agent: `${creds.login}/${t}-${crypto.randomBytes(3).toString('hex')}`, tool: t, pid: owner };
@@ -987,18 +998,24 @@ async function windowLogin(P) {
   return 1;
 }
 
-// SessionStart sans identifiants : ouvre une fenêtre de terminal (sinon la page web) sans bloquer le hook, et renvoie le texte pour l'agent.
-async function loginHookText(P, why) {
-  const term = `${RUN} login`;
-  const base = `${why} Ne demande jamais le mot de passe dans le chat.`;
-  if (process.env.GF_BUS_NO_GUI || chooseLoginMethod({ isTTY: false, gui: true }) !== 'window') return `${base} Demande à l'utilisateur de lancer dans un terminal : ${term}`;
+// Ouvre (ou constate déjà ouverte) la fenêtre de connexion : verrou « une fenêtre à la fois ». Renvoie true si une fenêtre existe.
+function openLoginWindow(P) {
+  if (process.env.GF_BUS_NO_GUI || chooseLoginMethod({ isTTY: false, gui: true }) !== 'window') return false;
   let opened = lockHeld(P);
   if (!opened && takeLock(P)) {
     const pid = openTerminalWindow(P);
     if (pid) { try { fs.writeFileSync(lockFile(P), String(pid), { mode: 0o600 }); } catch {} opened = true; }
     else try { fs.rmSync(lockFile(P), { force: true }); } catch {}
   }
-  if (!opened) return `${base} Lance \`${term}\` dans un terminal.`;
+  return opened;
+}
+
+// SessionStart (ou start) sans identifiants : ouvre une fenêtre de terminal sans bloquer, et renvoie le texte pour l'agent.
+async function loginHookText(P, why) {
+  const term = `${RUN} login`;
+  const base = `${why} Ne demande jamais le mot de passe dans le chat.`;
+  if (process.env.GF_BUS_NO_GUI || chooseLoginMethod({ isTTY: false, gui: true }) !== 'window') return `${base} Demande à l'utilisateur de lancer dans un terminal : ${term}`;
+  if (!openLoginWindow(P)) return `${base} Lance \`${term}\` dans un terminal.`;
   return `${base} Une fenêtre de terminal « ${TITLE} » vient de s'ouvrir pour te connecter ; sinon lance \`${term}\` dans un terminal.`;
 }
 
@@ -1037,14 +1054,18 @@ async function declare(P, creds, o, hook) {
   const prev = readSessions(P)[r.agent];
   const work = o.work !== undefined && o.work !== true ? o.work : prev?.work ?? (g.root ? `${g.repo}:${g.branch}` : null);
   await ensureDaemon(P);
-  const pid = o.pid ? Number(o.pid) : r.pid || ownerPid();
-  const res = await rpc(P, { op: 'register', agent: r.agent, tool: r.tool, pid, dir: cwd, repo: g.repo, branch: g.branch, work, chans: o.chan ? String(o.chan).split(',') : undefined, prevWork: prev?.work, role: typeof o.role === 'string' ? (o.role === 'none' ? null : o.role) : prev?.role });
-  if (res.ok) writeSession(P, r.agent, { pid, cwd, tool: r.tool, work: res.work ?? work, role: res.role ?? null });
+  // Hook (session_id) ou --pid explicite : présence liée au processus. Sinon (start à la main, PowerShell éphémère, --as) : tient jusqu'à `stop` ou GF_BUS_IDLE s d'inactivité.
+  const pid = o.pid ? Number(o.pid) : hook ? (r.pid || ownerPid()) : null;
+  const idleMs = pid ? 0 : idleSeconds() * 1000;
+  const res = await rpc(P, { op: 'register', agent: r.agent, tool: r.tool, pid, idleMs, dir: cwd, repo: g.repo, branch: g.branch, work, chans: o.chan ? String(o.chan).split(',') : undefined, prevWork: prev?.work, role: typeof o.role === 'string' ? (o.role === 'none' ? null : o.role) : prev?.role });
+  if (res.ok) writeSession(P, r.agent, { pid, idle: !pid, cwd, project: projectRoot(), tool: r.tool, work: res.work ?? work, role: res.role ?? null });
   return { ...res, agent: r.agent, cwd };
 }
 function currentAgent(P, creds, o, hook) {
   const cwd = path.resolve(o.dir || hook?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  return resolveAgent(P, creds, { asAgent: o.as, hook, tool: o.tool, cwd, forStart: false });
+  const r = resolveAgent(P, creds, { asAgent: o.as, hook, tool: o.tool, cwd, forStart: false });
+  if (r) { const s = readSessions(P)[r.agent]; if (s?.idle && Date.now() - s.ts > 30000) writeSession(P, r.agent, s); } // toute commande prolonge la présence
+  return r;
 }
 function startText(P, res, who) {
   const lines = [`Bus des agents GripForge : tu es ${res.agent}${res.connected ? '' : ' (broker injoignable pour l\'instant : messages remis à la reconnexion)'}. Sujet de travail : ${res.work || `aucun — annonce-le : ${RUN} work <sujet>`}.`];
@@ -1212,7 +1233,17 @@ export async function main(argv) {
       case 'merge-settings': return mergeSettingsCmd(o);
       case 'install': return await cmdInstall(P, o);
     }
-    const creds = needCreds(P, false);
+    let creds;
+    if (cmd === 'start' && !loadCreds(P)) {
+      say(await loginHookText(P, 'Bus des agents non connecté.'));
+      if (process.stdin.isTTY && process.stdout.isTTY && !process.env.GF_BUS_NO_GUI) { // terminal interactif : attend la connexion (~2 min)
+        const t0 = Date.now();
+        while (!loadCreds(P) && Date.now() - t0 < (Number(process.env.GF_BUS_START_WAIT_MS) || 120000)) await sleep(1000);
+        if (loadCreds(P)) say('Connecté.');
+      }
+      creds = loadCreds(P);
+      if (!creds) return 0;
+    } else creds = needCreds(P, false);
     if (!creds) return 0;
     switch (cmd) {
       case 'start': {
@@ -1323,6 +1354,7 @@ export async function main(argv) {
         const me = currentAgent(P, creds, o);
         if (!me) { say('aucun agent à retirer'); return 0; }
         await rpc(P, { op: 'unregister', agent: me.agent, why: '(stop)' }).catch(() => {});
+        { const all = readSessions(P); if (all[me.agent]) { delete all[me.agent]; writeJson(P.sessions, all); } }
         say(`agent ${me.agent} retiré (ses messages restent en attente sur le broker)`);
         return 0;
       }
