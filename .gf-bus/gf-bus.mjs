@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 export const DEFAULT_URL = 'wss://bus.gripforge.ai';
 export const KINDS = ['info', 'question', 'request', 'answer'];
 const IS_WIN = process.platform === 'win32';
@@ -1218,6 +1218,12 @@ const HELP = `gf-bus ${VERSION} — bus des agents GripForge (mode d'emploi : US
 export async function main(argv) {
   const o = parseArgs(argv);
   const cmd = o._[0] || 'help';
+  // --help / -h : aide, sans aucun effet de bord (rien n'est déclaré ni lancé). Pour `wrap`, les arguments suivants
+  // appartiennent à l'outil enveloppé (claude --help) : seul `wrap --help` est une demande d'aide de gf-bus.
+  const stop = argv.indexOf('--');
+  const head = stop < 0 ? argv : argv.slice(0, stop);
+  const wantsHelp = cmd === 'wrap' ? ['--help', '-h'].includes(head[1]) : (!!o.help || head.includes('-h'));
+  if (wantsHelp) { say(HELP); return 0; }
   const P = paths();
   const major = Number(process.versions.node.split('.')[0]);
   if (major < 22) { if (cmd !== 'hook' || true) say(`gf-bus : Node >= 22 requis (trouvé ${process.versions.node}), bus désactivé.`); return 0; }
@@ -1442,7 +1448,22 @@ async function cmdInstall(P, o) {
   return 0;
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+// Point d'entrée : Node résout les liens symboliques dans import.meta.url mais pas dans argv[1].
+// Ancienne comparaison d'abord (inchangée) ; chemins réels seulement en repli, donc jamais plus strict qu'avant.
+export function normPathForCompare(p, platform = process.platform) {
+  let r = String(p);
+  if (platform === 'win32') r = r.replace(/^\\\\\?\\(UNC\\)?/, (m, unc) => (unc ? '\\\\' : '')).replace(/\\/g, '/').toLowerCase();
+  return r.length > 1 ? r.replace(/\/+$/, '') : r;
+}
+export function isEntryPoint(argv1 = process.argv[1], metaUrl = import.meta.url, platform = process.platform, realpath = fs.realpathSync) {
+  if (!argv1) return false;
+  try { if (pathToFileURL(path.resolve(argv1)).href === metaUrl) return true; } catch {}
+  try {
+    const real = (p) => { try { return realpath(p); } catch { return p; } };
+    return normPathForCompare(real(path.resolve(argv1)), platform) === normPathForCompare(real(fileURLToPath(metaUrl)), platform);
+  } catch { return false; }
+}
+if (isEntryPoint()) {
   // main() ne se résout qu'une fois la commande finie (démon arrêté, abonnement terminé, outil lancé par wrap sorti).
   main(process.argv.slice(2)).then((c) => {
     process.exitCode = c ?? 0;
