@@ -30,6 +30,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_gamekit_installed',
   'gripforge_gamekit_install',
   'gripforge_gamekit_remove',
+  'gripforge_game_host_provides',
   'gripforge_gamekit_configure',
   'gripforge_gamekit_dependencies',
   'gripforge_gamekit_update',
@@ -477,7 +478,7 @@ export function registerGameKitTools(
   tool(
     'gripforge_gamekit_remove',
     'Uninstall a Game Kit from a project',
-    'Uninstall a kit from a Game Kit project (gkp_…). Remove a kit the user installed (addedBy user in gripforge_gamekit_installed) only when the user asks. game.engine (the engine of the game) and the default kits (ui.menu, input.remap, settings.graphics, ui.prompts, ui.endscreen, save.persistence, audio.core, i18n.text, ui.theme, input.virtualpad, display.fullscreen, asset.preload, asset.cache, ai.navigation on web, addedBy default) are removed only when the user explicitly asks — never to "clean up". A kit other kits depend on, and game.engine always, is not removed by a first call: it answers 409 (kit_in_use, or confirm_required) with details { dependents, confirm } — nothing applied; show the user the dependents, then call again with with_dependents=true and confirm=<token> to remove the kit and its dependents together (the token is bound to the project revision). dry_run=true returns the plan, the dependents and the token without writing. force=true (legacy) removes it and disables its dependents instead; prune=true also drops the dependencies nothing else needs (never game.engine nor a default kit). Returns { applied, removed[], dependents, project }. 0 credits.',
+    'Uninstall a kit from a Game Kit project (gkp_…). Remove a kit the user installed (addedBy user in gripforge_gamekit_installed) only when the user asks. game.engine (the engine of the game) and the default kits (ui.menu, input.remap, settings.graphics, ui.prompts, ui.endscreen, save.persistence, audio.core, i18n.text, ui.theme, input.virtualpad, display.fullscreen, asset.preload, asset.cache, ai.navigation on web, addedBy default) are removed only when the user explicitly asks — never to "clean up". A kit other kits depend on, and game.engine always, is not removed by a first call: it answers 409 (kit_in_use, or confirm_required) with details { dependents, confirm } — nothing applied; show the user the dependents, then call again with with_dependents=true and confirm=<token> to remove the kit and its dependents together (the token is bound to the project revision). dry_run=true returns the plan, the dependents and the token without writing. force=true (legacy) removes it and disables its dependents instead; prune=true also drops the dependencies nothing else needs (never game.engine nor a default kit). When the GAME serves what the kit provided (its own terrain for world.ground, its own camera…: a Godot, Unity, Unreal or Bevy project attached with game-attach), pass host_provides=["world.ground"] (or [] for every capability the dependents need from it, listed in details.hostable of the 409): the kit goes ALONE, its dependents stay, and the project declares those capabilities served by the game (hostProvides) — offer this to the user before removing dependents. Returns { applied, removed[], dependents, project }. 0 credits.',
     {
       project_id: projectId,
       id: kitId,
@@ -486,11 +487,13 @@ export function registerGameKitTools(
       confirm: schema.string().max(80).optional().describe('The confirm token of the previous answer, after the user saw the dependents.'),
       force: schema.boolean().optional().describe('Legacy: remove even when other kits depend on it; they are disabled, not removed.'),
       prune: schema.boolean().optional().describe('true to also remove dependencies that no remaining kit requires (never game.engine nor a default kit).'),
+      host_provides: schema.array(schema.string().max(120)).max(32).optional().describe('The capabilities the game serves itself in place of this kit (e.g. ["world.ground"]; [] = all those its dependents need from it): the kit is removed alone and they are declared in the project (hostProvides). See gripforge_game_host_provides.'),
       reason: schema.string().max(300).optional().describe('One sentence: why you do this, recorded in the project history (required in spirit when you go against the installed-kits rule).'),
     },
     { readOnly: false, destructive: true },
-    (args, extra) =>
-      api(`gamekit-projects/${enc(args.project_id)}/kits/${enc(args.id)}`, args, 'DELETE', extra?.signal, {
+    (args, extra) => Array.isArray(args.host_provides)
+      ? api(`gamekit-projects/${enc(args.project_id)}/host-provides`, { workspace_id: (args as Record<string, unknown>).workspace_id, remove_kit: args.id, ...((args.host_provides as unknown[]).length ? { add: args.host_provides } : {}), ...(args.prune === true ? { prune: true } : {}), ...(args.dry_run === true ? { dry_run: true } : {}), ...(typeof args.reason === 'string' && args.reason.trim() ? { reason: args.reason } : {}) }, 'POST', extra?.signal)
+      : api(`gamekit-projects/${enc(args.project_id)}/kits/${enc(args.id)}`, args, 'DELETE', extra?.signal, {
         force: args.force === true ? 1 : undefined,
         prune: args.prune === true ? 1 : undefined,
         dry_run: args.dry_run === true ? 1 : undefined,
@@ -498,6 +501,34 @@ export function registerGameKitTools(
         confirm: typeof args.confirm === 'string' && args.confirm ? args.confirm : undefined,
         reason: typeof args.reason === 'string' && args.reason.trim() ? args.reason : undefined,
       }),
+  );
+
+  tool(
+    'gripforge_game_host_provides',
+    'Capabilities the game serves itself',
+    'Declare that the GAME serves a capability itself instead of a kit (GameProjectDoc.hostProvides), as the engine host serves physics.character: the user\'s own Godot / Unity / Unreal / Bevy terrain answers world.ground, its own camera camera.*… With the declaration the kits that require it keep working without a provider kit (none is added, none is removed with its dependents) and remove_kit removes that provider kit ALONE in the same revision. The game must then serve it at run time (GDScript host.provide_service("world.ground", obj), Unity Provide, Unreal ProvideService, C gfk_provide, Rust Host::provide — gripforge_docs topic engine-interop); a kit that asks it before it is served logs a warning naming it. Without add/remove it lists { hostProvides, hostable: { <kit>: capabilities the game could serve in its place } }. remove withdraws a declaration: the default provider kit comes back. dry_run=true previews. Then re-run game-attach in the engine project. 0 credits.',
+    {
+      project_id: projectId,
+      add: schema.array(schema.string().max(120)).max(32).optional().describe('Capabilities the game serves from now on, e.g. ["world.ground"] (any version) or ["world.ground@1.0.0"].'),
+      remove: schema.array(schema.string().max(120)).max(32).optional().describe('Capabilities a kit serves again (its default provider is installed back).'),
+      remove_kit: kitId.optional().describe('A provider kit to remove alone in the same revision (e.g. world.scene_ground); without add, the capabilities it provides to its dependents are declared.'),
+      prune: schema.boolean().optional().describe('true to also drop the auto-installed provider kits nothing needs any more.'),
+      dry_run: schema.boolean().optional().describe('true to return the plan without writing.'),
+      reason: schema.string().max(300).optional().describe('One sentence recorded in the project history.'),
+    },
+    { readOnly: false },
+    (args, extra) => {
+      const caps = (v: unknown): string[] => (Array.isArray(v) ? v.filter((c): c is string => typeof c === 'string') : []);
+      const add = caps(args.add), remove = caps(args.remove);
+      const change = add.length + remove.length > 0 || !!args.remove_kit;
+      if (!change) return api(`gamekit-projects/${enc(args.project_id)}/host-provides`, args, 'GET', extra?.signal);
+      return api(`gamekit-projects/${enc(args.project_id)}/host-provides`, {
+        workspace_id: (args as Record<string, unknown>).workspace_id,
+        ...(add.length ? { add } : {}), ...(remove.length ? { remove } : {}),
+        ...(args.remove_kit ? { remove_kit: args.remove_kit } : {}), ...(args.prune === true ? { prune: true } : {}),
+        ...(args.dry_run === true ? { dry_run: true } : {}), ...(typeof args.reason === 'string' && args.reason.trim() ? { reason: args.reason } : {}),
+      }, 'POST', extra?.signal);
+    },
   );
 
   tool(
