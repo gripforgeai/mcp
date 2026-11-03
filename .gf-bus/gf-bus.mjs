@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const VERSION = '0.1.2';
+export const VERSION = '0.1.3';
 export const DEFAULT_URL = 'wss://bus.gripforge.ai';
 export const KINDS = ['info', 'question', 'request', 'answer'];
 const IS_WIN = process.platform === 'win32';
@@ -397,7 +397,21 @@ function parseLines(t) { const out = []; for (const l of t.split('\n')) { if (!l
 export class Inbox {
   constructor(dir) { this.dir = dir; this.file = path.join(dir, 'inbox.jsonl'); this.cursor = path.join(dir, 'cursor'); }
   append(rec) { fs.mkdirSync(this.dir, { recursive: true }); fs.appendFileSync(this.file, JSON.stringify(rec) + '\n'); }
+  // Marque « lu » (curseur) partagée par les hooks, `inbox --new` et `wait` : prise sous verrou, un message n'est montré qu'une fois.
   readNew(advance = true) {
+    if (!advance) return this._readNew(false);
+    const lock = this.cursor + '.lock';
+    let fd = null;
+    for (let i = 0; i < 200 && fd == null; i++) {
+      try { fs.mkdirSync(this.dir, { recursive: true }); fd = fs.openSync(lock, 'wx'); } catch (e) {
+        if (e.code !== 'EEXIST') break;
+        try { if (Date.now() - fs.statSync(lock).mtimeMs > 3000) { fs.rmSync(lock, { force: true }); continue; } } catch {}
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+      }
+    }
+    try { return this._readNew(true); } finally { if (fd != null) { fs.closeSync(fd); fs.rmSync(lock, { force: true }); } }
+  }
+  _readNew(advance) {
     let off = 0, size;
     try { off = Number(fs.readFileSync(this.cursor, 'utf8')) || 0; } catch {}
     try { size = fs.statSync(this.file).size; } catch { return []; }
@@ -557,6 +571,18 @@ export class Daemon {
     a.seen.add(r.msg.id);
     if (a.seen.size > 2000) a.seen = new Set([...a.seen].slice(-1000));
     a.inbox.append({ ...r.msg, via: r.via, rx: new Date().toISOString() });
+    this.wake(a, 'msg');
+  }
+  // `run wait` : connexion gardée ouverte sur le socket local, prévenue dès qu'un message est rangé (aucun sondage).
+  wake(a, ev) { for (const w of [...(a.waiters || [])]) w(ev); }
+  addWaiter(c, req) {
+    const a = this.agents.get(req.agent);
+    if (!a) { try { c.write(JSON.stringify({ ok: false, error: `agent ${req.agent} non déclaré : lancer « run start »` }) + '\n'); } catch {} return; }
+    const w = (ev) => { a.waiters.delete(w); try { c.write(JSON.stringify({ ok: true, event: ev }) + '\n'); } catch {} };
+    a.waiters.add(w);
+    a.touched = Date.now();
+    c.once('close', () => a.waiters.delete(w));
+    try { c.write(JSON.stringify({ ok: true, event: 'armed' }) + '\n'); } catch {}
   }
   async register(req, restoring = false) {
     if (!this.creds?.password) return { ok: false, error: 'pas d\'identifiants' };
@@ -579,7 +605,7 @@ export class Daemon {
     a = {
       id, login: sa.login, tid: sa.tid, pid: req.pid || null, idleMs: req.pid ? 0 : (req.idleMs || 0), touched: Date.now(), chans,
       info: { agent: id, login: sa.login, tool: req.tool || 'autre', machine: os.hostname(), dir: req.dir || '', repo: req.repo || '', branch: req.branch || '', work: req.work || null, role: req.role || null, since: req.since || new Date().toISOString(), version: VERSION },
-      inbox: new Inbox(agentDir(this.P, id)),
+      inbox: new Inbox(agentDir(this.P, id)), waiters: new Set(),
     };
     a.seen = new Set(a.inbox.all().slice(-1000).map((m) => m.id));
     a.client = this.client(`gfb:${id}`, {
@@ -672,6 +698,7 @@ export class Daemon {
     const a = this.agents.get(id);
     if (!a) return { ok: true, absent: true };
     this.agents.delete(id);
+    this.wake(a, 'retire');
     if (a.client.connected) await withTimeout(a.client.publish(T.presence(a.login, a.tid), '', { retain: true }), 2000);
     await a.client.end();
     this.saveAgents();
@@ -700,7 +727,9 @@ export class Daemon {
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
         let req, res;
-        try { req = JSON.parse(line); res = await this.handle(req); } catch (e) { res = { ok: false, error: e.message }; }
+        try { req = JSON.parse(line); } catch {}
+        if (req?.op === 'wait') { this.addWaiter(c, req); continue; }
+        try { req = req ?? JSON.parse(line); res = await this.handle(req); } catch (e) { res = { ok: false, error: e.message }; }
         try { c.write(JSON.stringify(res) + '\n'); } catch {}
         if (req?.op === 'upgrade' || req?.op === 'shutdown') setTimeout(() => this.shutdown(req.op === 'shutdown', req.op), 50);
       }
@@ -721,7 +750,7 @@ export class Daemon {
       case 'reload': {
         this.loadCreds(); this.startMonitor();
         const saved = [...this.agents.values()].map((a) => ({ agent: a.id, tool: a.info.tool, pid: a.pid, dir: a.info.dir, repo: a.info.repo, branch: a.info.branch, work: a.info.work, role: a.info.role, chans: a.chans, since: a.info.since, idleMs: a.idleMs }));
-        for (const a of this.agents.values()) await a.client.end();
+        for (const a of this.agents.values()) { this.wake(a, 'restart'); await a.client.end(); }
         this.agents.clear();
         for (const s of saved) await this.register(s, true);
         this.saveAgents();
@@ -735,7 +764,7 @@ export class Daemon {
     const sess = this.agents.size ? readJson(this.P.sessions, {}) : {};
     for (const a of [...this.agents.values()]) {
       if (a.pid && !alive(a.pid)) await this.unregister(a.id, '(processus terminé)');
-      else if (!a.pid && a.idleMs && Date.now() - Math.max(a.touched || 0, sess[a.id]?.ts || 0) > a.idleMs) await this.unregister(a.id, '(inactif)');
+      else if (!a.pid && a.idleMs && !a.waiters.size && Date.now() - Math.max(a.touched || 0, sess[a.id]?.ts || 0) > a.idleMs) await this.unregister(a.id, '(inactif)');
     }
     if (!this.agents.size && Date.now() - this.idleSince > 30 * 60e3) await this.shutdown(true, 'inactif');
   }
@@ -1059,7 +1088,7 @@ async function declare(P, creds, o, hook) {
   const idleMs = pid ? 0 : idleSeconds() * 1000;
   const res = await rpc(P, { op: 'register', agent: r.agent, tool: r.tool, pid, idleMs, dir: cwd, repo: g.repo, branch: g.branch, work, chans: o.chan ? String(o.chan).split(',') : undefined, prevWork: prev?.work, role: typeof o.role === 'string' ? (o.role === 'none' ? null : o.role) : prev?.role });
   if (res.ok) writeSession(P, r.agent, { pid, idle: !pid, cwd, project: projectRoot(), tool: r.tool, work: res.work ?? work, role: res.role ?? null });
-  return { ...res, agent: r.agent, cwd };
+  return { ...res, agent: r.agent, tool: r.tool, cwd };
 }
 function currentAgent(P, creds, o, hook) {
   const cwd = path.resolve(o.dir || hook?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
@@ -1067,12 +1096,78 @@ function currentAgent(P, creds, o, hook) {
   if (r) { const s = readSessions(P)[r.agent]; if (s?.idle && Date.now() - s.ts > 30000) writeSession(P, r.agent, s); } // toute commande prolonge la présence
   return r;
 }
+// Réveil d'une session au repos : la commande bloquante `wait`, lancée en tâche de fond, sort dès qu'un message arrive.
+// Sous Windows, `node "C:/…/gf-bus.mjs"` marche tel quel dans Git Bash (outil Bash de Claude Code), PowerShell et cmd.
+export const waitRun = (win = IS_WIN) => (win ? `node "${SELF.replace(/\\/g, '/')}"` : /\s/.test(RUN) ? `"${RUN}"` : RUN);
+export function waitHint(agent, tool = 'claude', run = waitRun()) {
+  const cmd = `${run} wait --as ${agent}`;
+  if (tool === 'claude') return `Messages instantanés : lance MAINTENANT en tâche de fond (outil Bash, run_in_background: true) : ${cmd} — elle sort dès qu'un message arrive et sa sortie te réveille même au repos. Lis le message, réponds si besoin, puis relance-la (une seule à la fois).`;
+  return `Messages instantanés : lance en arrière-plan ${cmd} ; elle sort dès qu'un message arrive (relance-la après chaque message). Sans tâche de fond : ${cmd} --timeout 600 quand tu attends une réponse.`;
+}
+async function waitOnce(P, agent, ib, ms) {
+  return new Promise((resolve) => {
+    let armed = false, buf = '', done = false, timer;
+    const c = net.connect(P.sock);
+    const fin = (r) => { if (done) return; done = true; clearTimeout(timer); c.destroy(); resolve({ ...r, armed }); };
+    if (ms) timer = setTimeout(() => fin({ type: 'timeout' }), ms);
+    const arm = () => c.write(JSON.stringify({ op: 'wait', agent }) + '\n');
+    const check = () => { const msgs = ib.readNew(); if (msgs.length) fin({ type: 'msgs', msgs }); else arm(); };
+    c.on('connect', arm);
+    c.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        let r; try { r = JSON.parse(buf.slice(0, i)); } catch { r = {}; }
+        buf = buf.slice(i + 1);
+        if (!r.ok) return fin({ type: 'error', error: r.error || 'réponse invalide du démon' });
+        if (r.event === 'armed') { // armé d'abord, puis lecture : aucun message ne passe entre les deux
+          armed = true;
+          const msgs = ib.readNew();
+          if (msgs.length) return fin({ type: 'msgs', msgs });
+        } else if (r.event === 'msg') check(); // déjà lu par un hook ou une autre attente : on se réarme
+        else if (r.event === 'retire') return fin({ type: 'retire' });
+        else if (r.event === 'restart') return fin({ type: 'restart' });
+      }
+    });
+    c.on('error', () => fin({ type: 'restart' }));
+    c.on('close', () => fin({ type: 'restart' }));
+  });
+}
+// `run wait [--timeout S] [--follow]` : bloque jusqu'au prochain message (direct, sujet work:, canal suivi, relecture),
+// l'affiche, le marque lu (même marque que `inbox --new` et les hooks) et sort en 0. --follow : continue (outil Monitor).
+async function cmdWait(P, creds, o) {
+  const me = currentAgent(P, creds, o);
+  if (!me) { say(`agent non déclaré : ${RUN} start`); return 1; }
+  const ib = new Inbox(agentDir(P, me.agent));
+  await ensureDaemon(P).catch(() => {}); // remplace un démon 0.1.2 qui ne connaît pas `wait` (agents conservés)
+  const tmo = Number(o.timeout) > 0 ? Number(o.timeout) * 1000 : 0, end = tmo ? Date.now() + tmo : 0;
+  let fails = 0;
+  for (;;) {
+    const left = end ? end - Date.now() : 0;
+    if (end && left <= 0) { say(`gf-bus : aucun message en ${tmo / 1000} s.`); return 2; }
+    const r = await waitOnce(P, me.agent, ib, left);
+    if (r.type === 'msgs') {
+      say(formatMsgs(r.msgs));
+      if (!o.follow) { say(`Puis relance l'attente en tâche de fond : ${waitRun()} wait --as ${me.agent}`); return 0; }
+      fails = 0; continue;
+    }
+    if (r.type === 'timeout') { say(`gf-bus : aucun message en ${tmo / 1000} s.`); return 2; }
+    if (r.type === 'retire') { say(`gf-bus : agent ${me.agent} retiré du bus (fin de session ou stop) : attente terminée.`); return 3; }
+    if (r.type === 'error') { say(`gf-bus : ${r.error}`); return 1; }
+    // démon arrêté, remplacé ou rechargé : on le relance (il restaure ses agents) et on se réabonne
+    if (r.armed) fails = 0;
+    if (++fails > 5) { say(`gf-bus : démon injoignable (voir ${P.log}).`); return 1; }
+    await sleep(300 * fails);
+    await ensureDaemon(P).catch(() => {});
+  }
+}
 function startText(P, res, who) {
   const lines = [`Bus des agents GripForge : tu es ${res.agent}${res.connected ? '' : ' (broker injoignable pour l\'instant : messages remis à la reconnexion)'}. Sujet de travail : ${res.work || `aucun — annonce-le : ${RUN} work <sujet>`}.`];
   lines.push('En ligne :', fmtPresence(who, res.agent));
   const msgs = new Inbox(agentDir(P, res.agent)).readNew();
   if (msgs.length) lines.push(formatMsgs(msgs));
   if (res.role === 'review') lines.push(`Rôle : relecteur. Prends une demande avec ${RUN} review-claim <id>, puis ${RUN} review-done <id> --verdict ok|changes --note "…". Tu donnes un avis, tu ne fusionnes jamais.`);
+  lines.push(waitHint(res.agent, res.tool));
   lines.push(`Quand tu as fini une PR ou une branche : ${RUN} review-request <PR ou branche> --note "…".`);
   lines.push(`Commandes : ${RUN} who | send <login/agent|work:<sujet>|chan:<nom>> "texte" | reply <id> "texte" | inbox | work <sujet>. Mode d'emploi : ${path.join(path.dirname(SELF), 'USAGE.md')}`);
   lines.push(RULE);
@@ -1202,6 +1297,7 @@ const HELP = `gf-bus ${VERSION} — bus des agents GripForge (mode d'emploi : US
   send <login/agent|work:S|chan:N> <texte> [--kind info|question|request|answer]
   reply <id> <texte>            répond à un message reçu
   inbox [--new|--all]           messages reçus
+  wait [--timeout S] [--follow] attend le prochain message (à lancer en tâche de fond), l'affiche et sort
   work <sujet>                  change le sujet de travail
   stop [--daemon]               retire l'agent (ou arrête le démon)
   status                        état du démon
@@ -1344,6 +1440,7 @@ export async function main(argv) {
         if (msgs.length) say(formatMsgs(msgs)); else if (!o.new) say('(aucun message)');
         return 0;
       }
+      case 'wait': return await cmdWait(P, creds, o);
       case 'work': {
         const me = currentAgent(P, creds, o);
         if (!me) { say(`agent non déclaré : ${RUN} start`); return 1; }

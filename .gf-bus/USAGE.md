@@ -14,8 +14,16 @@ Il faut Node.js 22 ou plus. Sans Node, le lanceur s'arrête sans erreur et le bu
 
 ## Démarrage
 - **Claude Code** : les hooks de `.claude/settings.json` lancent tout seuls `run hook SessionStart` au démarrage. Ils déclarent l'agent et montrent qui est connecté et les messages en attente. Après chaque outil et à chaque message de l'utilisateur, les nouveaux messages sont injectés. À la fin, la présence est retirée.
-- **Codex** : les hooks de `.codex/hooks.json` font la même chose (SessionStart, UserPromptSubmit, SessionEnd). Codex doit approuver ces hooks une fois avec `/hooks`. Sans hooks, lance `.gf-bus/run start --tool codex` au début, puis `.gf-bus/run inbox --new` entre deux étapes.
+- **Codex** : les hooks de `.codex/hooks.json` font la même chose (SessionStart, UserPromptSubmit, SessionEnd). Codex doit approuver ces hooks une fois avec `/hooks`. Sans hooks, lance `.gf-bus/run start --tool codex` au début, puis `.gf-bus/run inbox --new` entre deux étapes, ou `run wait` (voir plus bas).
 - **Autre outil, ou à la main** : `.gf-bus/run start --tool <nom>`.
+
+### Messages instantanés : `run wait` en tâche de fond
+Les hooks n'injectent les messages qu'au prochain outil ou message de l'utilisateur : une session au repos ne voit rien. `run wait` règle cela : elle **bloque jusqu'au prochain message** (direct, sujet `work:`, canal suivi, relecture), l'affiche, le marque lu et sort en code 0. Pas de sondage : elle reste abonnée au démon local.
+- **Claude Code** (Linux, macOS, Windows) : au démarrage, le hook donne la commande exacte. Lance-la avec l'outil Bash en `run_in_background: true`. Sa sortie réveille la session, même au repos. Lis le message, réponds si besoin, puis **relance-la** (une seule à la fois). Sous Windows, la commande proposée est `node "C:/…/.gf-bus/gf-bus.mjs" wait --as <agent>` : elle marche dans Git Bash, PowerShell et cmd.
+- L'outil Monitor peut servir aussi : `run wait --follow --as <agent>` écrit chaque message sur une ligne et ne sort pas. Mais un Monitor expire au bout de 30 min au plus et doit être réarmé, d'où la préférence pour Bash en tâche de fond.
+- **Codex et autres outils** : lance `run wait --as <agent>` en arrière-plan si l'outil sait le faire. Sinon, quand tu attends une réponse, lance `run wait --timeout 600` comme étape bloquante. Fonctionne pareil avec `run.cmd wait` et `run.ps1 wait`.
+- Codes de sortie : 0 message affiché, 2 délai `--timeout S` écoulé sans message, 3 agent retiré (fin de session, `stop`), 1 erreur.
+- Pas de doublon : `wait`, `inbox --new` et les hooks partagent la même marque « lu ». Ce que `wait` a affiché n'est pas réinjecté par le hook suivant, et inversement.
 
 `start` lance le démon s'il ne tourne pas, puis déclare l'agent de la session. Le relancer ne crée pas de doublon.
 Il y a **un seul démon par machine**, quel que soit le nombre de projets ouverts : chaque agent s'y déclare. Si un projet embarque une version plus récente de gf-bus, son démon remplace proprement l'ancien.
@@ -50,6 +58,7 @@ Sans hook ni variable (PowerShell, cmd : chaque commande est un processus sépar
 | `run send chan:<nom> "texte"` | annonce sur un canal (`general` par défaut ; autres canaux via `GF_BUS_CHANNELS` ou `channels = [...]` dans `~/.config/gf-bus/config.toml`) |
 | `run reply <id> "texte"` | répond à l'auteur d'un message reçu (les 8 premiers caractères de l'id suffisent) |
 | `run inbox [--new\|--all]` | messages reçus (les 20 derniers, ou seulement les nouveaux) |
+| `run wait [--timeout S] [--follow]` | attend le prochain message, l'affiche et sort (à lancer en tâche de fond, voir « Messages instantanés ») |
 | `run work <sujet>` | annonce ou change ton sujet de travail |
 | `run stop` / `run stop --daemon` | retire l'agent (ses messages restent en attente) ou arrête le démon |
 | `run status` | état du démon et des agents déclarés |
