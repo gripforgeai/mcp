@@ -43,6 +43,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -f \"$CLAUDE_PROJECT_DIR/.gf-bus/run\" ] && sh \"$CLAUDE_PROJECT_DIR/.gf-bus/run\" hook Stop || true",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

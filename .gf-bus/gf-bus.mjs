@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const VERSION = '0.1.3';
+export const VERSION = '0.1.4';
 export const DEFAULT_URL = 'wss://bus.gripforge.ai';
 export const KINDS = ['info', 'question', 'request', 'answer'];
 const IS_WIN = process.platform === 'win32';
@@ -502,8 +502,9 @@ async function acquireLock(P) {
 }
 const releaseLock = (P) => fs.rmSync(P.lockDir, { recursive: true, force: true });
 
+export const WAIT_PING_MS = 20000, WAIT_DEAD_MS = 75000;
 export class Daemon {
-  constructor(P, env = process.env) { this.P = P; this.env = env; this.agents = new Map(); this.presence = new Map(); this.reviews = new Map(); this.monitorReady = false; this.idleSince = Date.now(); }
+  constructor(P, env = process.env) { this.P = P; this.env = env; this.agents = new Map(); this.presence = new Map(); this.reviews = new Map(); this.monitorReady = false; this.idleSince = Date.now(); this.now = () => Date.now(); } // now : horloge injectable (tests)
   async run() {
     const P = this.P;
     if (!(await acquireLock(P))) { dlog(P, 'verrou indisponible'); return 2; }
@@ -579,10 +580,18 @@ export class Daemon {
     const a = this.agents.get(req.agent);
     if (!a) { try { c.write(JSON.stringify({ ok: false, error: `agent ${req.agent} non déclaré : lancer « run start »` }) + '\n'); } catch {} return; }
     const w = (ev) => { a.waiters.delete(w); try { c.write(JSON.stringify({ ok: true, event: ev }) + '\n'); } catch {} };
+    w.conn = c; w.seen = this.now(); w.hb = false; // hb : le client envoie des battements (0.1.4+), on peut donc détecter une connexion morte en silence
     a.waiters.add(w);
-    a.touched = Date.now();
+    a.touched = this.now();
     c.once('close', () => a.waiters.delete(w));
     try { c.write(JSON.stringify({ ok: true, event: 'armed' }) + '\n'); } catch {}
+  }
+  // Battement d'un `wait` (toutes les WAIT_PING_MS) : prouve que la connexion vit (named pipe Windows compris) et prolonge la présence.
+  pingWaiters(c, agent) {
+    const a = this.agents.get(agent);
+    if (!a) return;
+    for (const w of a.waiters) if (w.conn === c) { w.seen = this.now(); w.hb = true; }
+    a.touched = this.now();
   }
   async register(req, restoring = false) {
     if (!this.creds?.password) return { ok: false, error: 'pas d\'identifiants' };
@@ -729,6 +738,7 @@ export class Daemon {
         let req, res;
         try { req = JSON.parse(line); } catch {}
         if (req?.op === 'wait') { this.addWaiter(c, req); continue; }
+        if (req?.op === 'ping') { this.pingWaiters(c, req.agent); try { c.write(JSON.stringify({ ok: true, event: 'pong' }) + '\n'); } catch {} continue; }
         try { req = req ?? JSON.parse(line); res = await this.handle(req); } catch (e) { res = { ok: false, error: e.message }; }
         try { c.write(JSON.stringify(res) + '\n'); } catch {}
         if (req?.op === 'upgrade' || req?.op === 'shutdown') setTimeout(() => this.shutdown(req.op === 'shutdown', req.op), 50);
@@ -745,6 +755,8 @@ export class Daemon {
       case 'review': return this.review(req);
       case 'reviews': return { ok: true, reviews: [...this.reviews.values()] };
       case 'role': { const a = this.agents.get(req.agent); if (!a) return { ok: false, error: 'agent non déclaré' }; await this.setRole(a, req.role); return { ok: true, role: a.info.role }; }
+      // Hook Stop / SessionStart : l'agent est-il déclaré, et une attente (`wait`) est-elle armée ? Prolonge la présence.
+      case 'waiters': { const a = this.agents.get(req.agent); if (!a) return { ok: true, known: false, waiters: 0 }; a.touched = this.now(); return { ok: true, known: true, waiters: a.waiters.size }; }
       case 'who': return { ok: true, presence: [...this.presence.values()], connected: !!this.monitor?.connected };
       case 'status': return { ok: true, version: VERSION, pid: process.pid, url: this.creds?.url, login: this.creds?.login, monitor: !!this.monitor?.connected, agents: [...this.agents.values()].map((a) => ({ agent: a.id, pid: a.pid, connected: a.client.connected, work: a.info.work })) };
       case 'reload': {
@@ -761,12 +773,16 @@ export class Daemon {
     }
   }
   async tick() {
+    const now = this.now();
     const sess = this.agents.size ? readJson(this.P.sessions, {}) : {};
     for (const a of [...this.agents.values()]) {
-      if (a.pid && !alive(a.pid)) await this.unregister(a.id, '(processus terminé)');
-      else if (!a.pid && a.idleMs && !a.waiters.size && Date.now() - Math.max(a.touched || 0, sess[a.id]?.ts || 0) > a.idleMs) await this.unregister(a.id, '(inactif)');
+      // attente silencieuse : plus de battement depuis WAIT_DEAD_MS -> connexion morte (veille, pipe cassé) : on la coupe, le client se reconnecte
+      for (const w of [...a.waiters]) if (w.hb && now - w.seen > WAIT_DEAD_MS) { a.waiters.delete(w); try { w.conn.destroy(); } catch {} dlog(this.P, `attente sans battement coupée (${a.id})`); }
+      if (a.pid && !alive(a.pid)) await this.unregister(a.id, '(processus terminé)'); // présence liée au processus de la session : il fait foi
+      else if (a.waiters.size) a.touched = now; // un `wait` branché = session vivante : la présence ne tombe pas
+      else if (!a.pid && a.idleMs && now - Math.max(a.touched || 0, sess[a.id]?.ts || 0) > a.idleMs) await this.unregister(a.id, '(inactif)');
     }
-    if (!this.agents.size && Date.now() - this.idleSince > 30 * 60e3) await this.shutdown(true, 'inactif');
+    if (!this.agents.size && now - this.idleSince > 30 * 60e3) await this.shutdown(true, 'inactif');
   }
   // clear=true : retire les présences (arrêt). Mise à niveau : on garde présences et liste d'agents pour le successeur.
   async shutdown(clear, why = 'arrêt') {
@@ -1084,7 +1100,9 @@ async function declare(P, creds, o, hook) {
   const work = o.work !== undefined && o.work !== true ? o.work : prev?.work ?? (g.root ? `${g.repo}:${g.branch}` : null);
   await ensureDaemon(P);
   // Hook (session_id) ou --pid explicite : présence liée au processus. Sinon (start à la main, PowerShell éphémère, --as) : tient jusqu'à `stop` ou GF_BUS_IDLE s d'inactivité.
-  const pid = o.pid ? Number(o.pid) : hook ? (r.pid || ownerPid()) : null;
+  // Windows : ownerPid() ne sait pas remonter les shells (pas de /proc ni de ps) et rendrait le pid du shell éphémère du hook,
+  // mort aussitôt : la présence tomberait en 5 s. On y garde donc la présence par inactivité, tenue par `wait` et par chaque hook Stop.
+  const pid = o.pid ? Number(o.pid) : hook && !IS_WIN ? (r.pid || ownerPid()) : null;
   const idleMs = pid ? 0 : idleSeconds() * 1000;
   const res = await rpc(P, { op: 'register', agent: r.agent, tool: r.tool, pid, idleMs, dir: cwd, repo: g.repo, branch: g.branch, work, chans: o.chan ? String(o.chan).split(',') : undefined, prevWork: prev?.work, role: typeof o.role === 'string' ? (o.role === 'none' ? null : o.role) : prev?.role });
   if (res.ok) writeSession(P, r.agent, { pid, idle: !pid, cwd, project: projectRoot(), tool: r.tool, work: res.work ?? work, role: res.role ?? null });
@@ -1104,12 +1122,20 @@ export function waitHint(agent, tool = 'claude', run = waitRun()) {
   if (tool === 'claude') return `Messages instantanés : lance MAINTENANT en tâche de fond (outil Bash, run_in_background: true) : ${cmd} — elle sort dès qu'un message arrive et sa sortie te réveille même au repos. Lis le message, réponds si besoin, puis relance-la (une seule à la fois).`;
   return `Messages instantanés : lance en arrière-plan ${cmd} ; elle sort dès qu'un message arrive (relance-la après chaque message). Sans tâche de fond : ${cmd} --timeout 600 quand tu attends une réponse.`;
 }
-async function waitOnce(P, agent, ib, ms) {
+async function waitOnce(P, agent, ib, ms, pingMs = Number(process.env.GF_BUS_WAIT_PING_MS) || WAIT_PING_MS) {
   return new Promise((resolve) => {
     let armed = false, buf = '', done = false, timer;
     const c = net.connect(P.sock);
-    const fin = (r) => { if (done) return; done = true; clearTimeout(timer); c.destroy(); resolve({ ...r, armed }); };
+    let hb, pongDue = 0;
+    const fin = (r) => { if (done) return; done = true; clearTimeout(timer); clearInterval(hb); c.destroy(); resolve({ ...r, armed }); };
     if (ms) timer = setTimeout(() => fin({ type: 'timeout' }), ms);
+    // Battement : une connexion morte en silence (veille, named pipe Windows) est détectée, on se reconnecte et on se réarme.
+    hb = setInterval(() => {
+      if (pongDue && Date.now() > pongDue) return fin({ type: 'restart' });
+      if (!armed) return;
+      if (!pongDue) pongDue = Date.now() + pingMs;
+      try { c.write(JSON.stringify({ op: 'ping', agent }) + '\n'); } catch { fin({ type: 'restart' }); }
+    }, pingMs);
     const arm = () => c.write(JSON.stringify({ op: 'wait', agent }) + '\n');
     const check = () => { const msgs = ib.readNew(); if (msgs.length) fin({ type: 'msgs', msgs }); else arm(); };
     c.on('connect', arm);
@@ -1119,6 +1145,7 @@ async function waitOnce(P, agent, ib, ms) {
       while ((i = buf.indexOf('\n')) >= 0) {
         let r; try { r = JSON.parse(buf.slice(0, i)); } catch { r = {}; }
         buf = buf.slice(i + 1);
+        if (r.event === 'pong' || (!r.ok && /opération inconnue/.test(r.error || ''))) { pongDue = 0; continue; } // démon 0.1.3 : pas de battement, la connexion répond quand même
         if (!r.ok) return fin({ type: 'error', error: r.error || 'réponse invalide du démon' });
         if (r.event === 'armed') { // armé d'abord, puis lecture : aucun message ne passe entre les deux
           armed = true;
@@ -1133,6 +1160,12 @@ async function waitOnce(P, agent, ib, ms) {
     c.on('close', () => fin({ type: 'restart' }));
   });
 }
+// Redéclare un agent tombé, d'après sa dernière déclaration (sessions) : présence par inactivité, tenue par l'attente.
+async function redeclare(P, me) {
+  const s = readSessions(P)[me.agent] || {};
+  const g = s.cwd ? gitInfo(s.cwd) : {};
+  return rpc(P, { op: 'register', agent: me.agent, tool: me.tool || s.tool, idleMs: idleSeconds() * 1000, dir: s.cwd, repo: g.repo, branch: g.branch, work: s.work ?? undefined, role: s.role ?? undefined });
+}
 // `run wait [--timeout S] [--follow]` : bloque jusqu'au prochain message (direct, sujet work:, canal suivi, relecture),
 // l'affiche, le marque lu (même marque que `inbox --new` et les hooks) et sort en 0. --follow : continue (outil Monitor).
 async function cmdWait(P, creds, o) {
@@ -1141,11 +1174,12 @@ async function cmdWait(P, creds, o) {
   const ib = new Inbox(agentDir(P, me.agent));
   await ensureDaemon(P).catch(() => {}); // remplace un démon 0.1.2 qui ne connaît pas `wait` (agents conservés)
   const tmo = Number(o.timeout) > 0 ? Number(o.timeout) * 1000 : 0, end = tmo ? Date.now() + tmo : 0;
-  let fails = 0;
+  let fails = 0, redeclared = false;
   for (;;) {
     const left = end ? end - Date.now() : 0;
     if (end && left <= 0) { say(`gf-bus : aucun message en ${tmo / 1000} s.`); return 2; }
     const r = await waitOnce(P, me.agent, ib, left);
+    if (r.armed) redeclared = false; // attente armée : une prochaine chute de présence pourra encore être réparée (--follow dure des jours)
     if (r.type === 'msgs') {
       say(formatMsgs(r.msgs));
       if (!o.follow) { say(`Puis relance l'attente en tâche de fond : ${waitRun()} wait --as ${me.agent}`); return 0; }
@@ -1153,6 +1187,10 @@ async function cmdWait(P, creds, o) {
     }
     if (r.type === 'timeout') { say(`gf-bus : aucun message en ${tmo / 1000} s.`); return 2; }
     if (r.type === 'retire') { say(`gf-bus : agent ${me.agent} retiré du bus (fin de session ou stop) : attente terminée.`); return 3; }
+    if (r.type === 'error' && !redeclared && /non déclaré/.test(r.error)) { // présence tombée (démon relancé, inactivité) : le wait la rétablit et se réarme
+      redeclared = true;
+      if ((await redeclare(P, me).catch(() => null))?.ok) continue;
+    }
     if (r.type === 'error') { say(`gf-bus : ${r.error}`); return 1; }
     // démon arrêté, remplacé ou rechargé : on le relance (il restaure ses agents) et on se réabonne
     if (r.armed) fails = 0;
@@ -1161,13 +1199,13 @@ async function cmdWait(P, creds, o) {
     await ensureDaemon(P).catch(() => {});
   }
 }
-function startText(P, res, who) {
+function startText(P, res, who, waiters = 0) {
   const lines = [`Bus des agents GripForge : tu es ${res.agent}${res.connected ? '' : ' (broker injoignable pour l\'instant : messages remis à la reconnexion)'}. Sujet de travail : ${res.work || `aucun — annonce-le : ${RUN} work <sujet>`}.`];
   lines.push('En ligne :', fmtPresence(who, res.agent));
   const msgs = new Inbox(agentDir(P, res.agent)).readNew();
   if (msgs.length) lines.push(formatMsgs(msgs));
   if (res.role === 'review') lines.push(`Rôle : relecteur. Prends une demande avec ${RUN} review-claim <id>, puis ${RUN} review-done <id> --verdict ok|changes --note "…". Tu donnes un avis, tu ne fusionnes jamais.`);
-  lines.push(waitHint(res.agent, res.tool));
+  lines.push(waiters && res.tool === 'claude' ? `Messages instantanés : une attente est déjà armée pour ${res.agent} (tâche de fond toujours en cours, par exemple après une compaction) : ne la relance pas maintenant ; relance-la seulement quand elle sort (${waitRun()} wait --as ${res.agent}, Bash run_in_background: true).` : waitHint(res.agent, res.tool));
   lines.push(`Quand tu as fini une PR ou une branche : ${RUN} review-request <PR ou branche> --note "…".`);
   lines.push(`Commandes : ${RUN} who | send <login/agent|work:<sujet>|chan:<nom>> "texte" | reply <id> "texte" | inbox | work <sujet>. Mode d'emploi : ${path.join(path.dirname(SELF), 'USAGE.md')}`);
   lines.push(RULE);
@@ -1188,17 +1226,49 @@ async function cmdHook(P, o) {
     if (!res.ok) return say(`gf-bus : ${res.error}`);
     if (process.env.CLAUDE_ENV_FILE) try { fs.appendFileSync(process.env.CLAUDE_ENV_FILE, `export GF_BUS_AGENT=${res.agent}\n`); } catch {}
     const who = await rpc(P, { op: 'who' }).catch(() => ({ presence: [] }));
-    return say(startText(P, res, who.presence || []));
+    const st = await rpc(P, { op: 'waiters', agent: res.agent }, 1500).catch(() => null);
+    return say(startText(P, res, who.presence || [], st?.waiters || 0));
   }
   if (!creds) return;
   const r = resolveAgent(P, creds, { hook: h, tool, cwd: h.cwd || process.cwd() });
   if (!r) return;
   if (ev === 'SessionEnd') { await rpc(P, { op: 'unregister', agent: r.agent, why: '(fin de session)' }, 1200).catch(() => {}); return; }
+  if (ev === 'Stop') return hookStop(P, creds, o, h, r, tool);
   const msgs = new Inbox(agentDir(P, r.agent)).readNew();
   if (!msgs.length) return;
   const txt = formatMsgs(msgs);
   if (ev === 'PostToolUse') return say(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: txt } }));
   return say(txt);
+}
+
+// Hook Stop (Claude Code) : la session ne finit pas son tour sans attente armée. Le démon sait si un `wait` est branché.
+// Ne bloque jamais deux fois de suite (stop_hook_active), ni hors Claude (Codex n'a pas de tâche de fond qui réveille la session).
+export function stopDecision({ tool = 'claude', stopActive = false, waiters = 0, msgs = [], agent, run = waitRun() }) {
+  if (tool !== 'claude' || stopActive || waiters > 0) return null;
+  const cmd = `${run} wait --as ${agent}`;
+  const lines = [];
+  if (msgs.length) lines.push(formatMsgs(msgs));
+  lines.push(`gf-bus : aucune attente de messages n'est armée pour ${agent}, la session deviendrait sourde au repos. Avant de finir, lance avec l'outil Bash en run_in_background: true (une seule à la fois) : ${cmd}`
+    + (msgs.length ? ' — et réponds d\'abord aux messages ci-dessus si besoin.' : ' — puis termine ton tour normalement.'));
+  return { decision: 'block', reason: lines.join('\n') };
+}
+async function hookStop(P, creds, o, h, r, tool) {
+  if (tool !== 'claude' || h.stop_hook_active) return; // pas de boucle : un seul rappel par fin de tour
+  const ask = () => rpc(P, { op: 'waiters', agent: r.agent }, 1500).catch(() => null);
+  let st = await ask();
+  if (!st?.ok) { await ensureDaemon(P).catch(() => {}); st = await ask(); } // démon arrêté ou ancien (0.1.3 ne connaît pas « waiters ») : relancé ou remplacé
+  if (!st?.ok) return; // état inconnu : on ne bloque pas
+  if (!st.known) { // présence tombée : on redéclare la session
+    if (fs.existsSync(P.authFailed)) return;
+    const res = await declare(P, creds, { ...o, tool }, h).catch(() => null);
+    if (!res?.ok) return;
+    st = { ok: true, known: true, waiters: 0 };
+  }
+  // un `wait` lancé juste avant la fin du tour met quelques centaines de ms à se brancher : on lui laisse un délai de grâce
+  const grace = Number(process.env.GF_BUS_STOP_GRACE_MS ?? 1500), t0 = Date.now();
+  while (!st.waiters && Date.now() - t0 < grace) { await sleep(150); st = (await ask()) || st; }
+  const d = stopDecision({ tool, waiters: st.waiters, msgs: st.waiters ? [] : new Inbox(agentDir(P, r.agent)).readNew(), agent: r.agent });
+  if (d) say(JSON.stringify(d));
 }
 
 async function cmdLogin(P, o) {
@@ -1527,7 +1597,7 @@ async function cmdInstall(P, o) {
   const run = path.join(dest, 'run');
   const cmd = (ev) => `[ -f "${run}" ] && sh "${run}" hook${ev === 'SessionStart' ? '' : ''} || true`;
   const tpl = { hooks: {} };
-  for (const [ev, to] of [['SessionStart', 15], ['UserPromptSubmit', 5], ['PostToolUse', 5], ['SessionEnd', 5]]) tpl.hooks[ev] = [{ hooks: [{ type: 'command', command: cmd(ev), timeout: to }] }];
+  for (const [ev, to] of [['SessionStart', 15], ['UserPromptSubmit', 5], ['PostToolUse', 5], ['Stop', 10], ['SessionEnd', 5]]) tpl.hooks[ev] = [{ hooks: [{ type: 'command', command: cmd(ev), timeout: to }] }];
   const sf = path.join(P.home, '.claude', 'settings.json');
   fs.mkdirSync(path.dirname(sf), { recursive: true });
   fs.writeFileSync(sf, JSON.stringify(mergeSettings(readJson(sf, {}), tpl), null, 2) + '\n');
