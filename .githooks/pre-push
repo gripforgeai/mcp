@@ -1,0 +1,54 @@
+#!/bin/sh
+# GripForge — hook pre-push partagé (charte, § 3.1 et § 11).
+#
+# 1. Refuse tout push (et toute suppression) vers main, master ou dev : on passe par une branche et une PR.
+# 2. Facultatif : si le fichier de noms interdits existe sur CE poste, refuse un push dont les lignes ajoutées en
+#    contiennent un (prénoms, pseudos, adresses…). La liste n'est jamais dans le dépôt.
+#    Emplacement : $GRIPFORGE_NOMS_INTERDITS, sinon ~/.config/gripforge/noms-interdits.txt (un mot par ligne).
+#
+# Activation, une fois par clone :   git config core.hooksPath .githooks
+# Fonctionne avec le sh de Git pour Windows, macOS et Linux.
+# « git push --no-verify » contourne le hook : réservé au responsable, pour une opération décidée et annoncée.
+
+zero=0000000000000000000000000000000000000000
+liste="${GRIPFORGE_NOMS_INTERDITS:-$HOME/.config/gripforge/noms-interdits.txt}"
+refus=0
+
+while read -r ref_locale sha_local ref_distante sha_distant; do
+  case "$ref_distante" in
+    refs/heads/main|refs/heads/master|refs/heads/dev)
+      branche=${ref_distante#refs/heads/}
+      echo "⛔ Push direct vers « $branche » refusé : poussez une branche labo/<sujet> et ouvrez une PR (gh pr create --draft --base dev)." >&2
+      refus=1
+      continue ;;
+  esac
+
+  # suppression de branche ou liste absente : rien d'autre à vérifier
+  [ "$sha_local" = "$zero" ] && continue
+  [ -s "$liste" ] || continue
+
+  # base de comparaison : ce qui est déjà sur le serveur, sinon le point de départ commun avec dev (ou main)
+  if [ "$sha_distant" != "$zero" ] && git cat-file -e "$sha_distant" 2>/dev/null; then
+    base=$sha_distant
+  else
+    base=$(git merge-base "$sha_local" origin/dev 2>/dev/null || git merge-base "$sha_local" origin/main 2>/dev/null || git merge-base "$sha_local" origin/master 2>/dev/null)
+  fi
+  [ -n "$base" ] || continue
+
+  # liste nettoyée : sans retours chariot (fichier écrit sous Windows) ni lignes vides (qui correspondraient à tout)
+  motifs=$(mktemp)
+  tr -d '\r' < "$liste" | grep -v '^[[:space:]]*$' > "$motifs"
+  trouve=""
+  if [ -s "$motifs" ]; then
+    trouve=$(git diff --unified=0 "$base" "$sha_local" | grep '^+' | grep -v '^+++' | grep -i -F -o -f "$motifs" | sort -u | head -n 5)
+  fi
+  rm -f "$motifs"
+  if [ -n "$trouve" ]; then
+    echo "⛔ Le push vers « ${ref_distante#refs/heads/} » ajoute des mots de la liste des noms interdits :" >&2
+    echo "$trouve" | sed 's/^/   - /' >&2
+    echo "   Remplacez-les par « le responsable », « un membre », « un contributeur »… puis recommencez." >&2
+    refus=1
+  fi
+done
+
+exit $refus

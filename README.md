@@ -1,12 +1,49 @@
+<div align="center">
+
+<img src="icon.png" alt="GripForge" width="120">
+
 # @gripforgeai/mcp
 
-**The tools your AI needs to make your games.**
+**The tools your AI needs to make your games.**<br>
+<sub>An MCP server that lets your AI agent turn prompts into game assets and playable game kits.</sub>
 
-Turn prompts into production-ready game assets — animated characters with their weapons attached, seamless textures, terrain, VFX, HUDs — and playable game kits.
+[![npm](https://img.shields.io/npm/v/@gripforgeai/mcp?style=flat&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/@gripforgeai/mcp)
+[![Publish](https://github.com/gripforgeai/mcp/actions/workflows/publish.yml/badge.svg)](https://github.com/gripforgeai/mcp/actions/workflows/publish.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat)](LICENSE)
+![Node](https://img.shields.io/badge/node-%3E%3D20.3-339933?style=flat&logo=nodedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
+
+**[🌐 gripforge.ai](https://gripforge.ai)** ·
+**[📖 Full tool docs](https://gripforge.ai/mcp-docs)** ·
+**[🔑 Get an API key](https://gripforge.ai/account)** ·
+**[🤝 Contributing](CONTRIBUTING.md)** ·
+**[🔐 Security](SECURITY.md)**
+
+</div>
+
+Turn prompts into production-ready game assets — animated characters with their weapons attached, seamless
+textures, terrain, VFX, HUDs — and playable game kits.
 
 MCP client for the [GripForge](https://gripforge.ai) API — from Claude Code, Cursor, Windsurf, VS Code or any MCP client.
 
-## How to use
+> [!NOTE]
+> **MCP** (Model Context Protocol) is a standard way for an AI assistant to call tools. This server gives your
+> assistant GripForge's tools: you describe what you want in plain words, the assistant calls the right tool.
+
+## 🧭 How it fits together
+
+```mermaid
+flowchart LR
+  A["🤖 Your AI client<br>Claude Code, Cursor, Windsurf, VS Code..."] -->|"hosted: HTTPS<br>gripforge.ai/mcp"| G["🌐 GripForge API"]
+  A -->|"local: npx @gripforgeai/mcp"| M["📦 This package"]
+  M -->|"GRIPFORGE_API_KEY"| G
+  M -->|"writes files"| R["📁 Your repository<br>Godot, Unity, Unreal, Three.js"]
+```
+
+The **hosted** endpoint needs nothing installed. The **npm package** (this repository) runs on your machine so that the
+agent can write files straight into your project.
+
+## 🚀 Quick start
 
 **Hosted — nothing to install.** Point any remote-capable MCP client at `https://gripforge.ai/mcp`
 with your API key ([create one here](https://gripforge.ai/account)):
@@ -42,7 +79,7 @@ claude mcp add --transport http gripforge https://gripforge.ai/mcp --header "x-a
 }
 ```
 
-## Key features
+## ✨ Key features
 
 - **Characters that move.** Describe one, get a rigged T-pose with an animation set — idle, run,
   attack — ready to drop into a scene.
@@ -58,7 +95,7 @@ claude mcp add --transport http gripforge https://gripforge.ai/mcp --header "x-a
 - **One Library.** Everything generated lands in a locker your engine can pull from, and that your
   agent can search by look ("Devil May Cry like", "genshin").
 
-## Use cases
+## 💡 Use cases
 
 - *"Attach this sword to my knight, right hand, then export the armed GLB."* — the agent handles the
   bone, the scale and the fist; you get a file that loads.
@@ -68,7 +105,7 @@ claude mcp add --transport http gripforge https://gripforge.ai/mcp --header "x-a
 - *"Build a playable roguelike slice I can try in the browser."* — a game kit project with its
   assets bound, playable from a link.
 
-## FAQ
+## ❓ FAQ
 
 **Do I need to install anything?** No. The hosted endpoint works from any MCP client that speaks
 streamable HTTP. The npm package exists for one reason: letting the agent write files directly into
@@ -86,7 +123,7 @@ your own, and share them with the community catalog.
 **Can I use my own concept art?** Yes — pass an image and GripForge builds the T-pose sheet from it
 rather than inventing a character.
 
-## Hosted endpoint
+## 🌐 Hosted endpoint
 
 No Node required — point any remote-capable MCP client at:
 
@@ -110,7 +147,7 @@ directly.
 }
 ```
 
-## Example
+## 🧪 Example
 
 > "Attach this sword to my knight, right hand, then export the armed GLB."
 
@@ -124,7 +161,7 @@ To forge a character **from a picture** (not from a text prompt), pass
 local `path` / `file_url`. That is Meshy image-to-3D. Without those fields the
 tool is text-to-3D only.
 
-## Install (any MCP client)
+## 🔌 Install (any MCP client)
 
 Add the server to your client's MCP config (`.mcp.json`, `mcp.json`, settings — the shape is the same everywhere):
 
@@ -140,9 +177,9 @@ Add the server to your client's MCP config (`.mcp.json`, `mcp.json`, settings �
 }
 ```
 
-Get an API key at https://gripforge.ai/login — Free: 15 Studio attaches + **3 API/MCP trial attaches / month**. Credit packs from €29 (100 credits, never expire).
+Get an API key at <https://gripforge.ai/login> — Free: 15 Studio attaches + **3 API/MCP trial attaches / month**. Credit packs from €29 (100 credits, never expire).
 
-## Install (Grok)
+## 🔌 Install (Grok)
 
 ```bash
 grok mcp add gripforge --env GRIPFORGE_API_KEY=gf_... -- npx -y @gripforgeai/mcp
@@ -165,7 +202,7 @@ Also works with Cursor, Windsurf and any MCP-compatible client — same
 `command` / `args` / `env` triple.
 
 
-## Tool reference
+## 🧰 Tool reference
 
 Hosted HTTP MCP (`https://gripforge.ai/mcp`) is always current. This npm package
 writes files into the repo (`out_dir`), including `gripforge_hud`,
@@ -227,7 +264,7 @@ Full list: https://gripforge.ai/mcp-docs
   submission, optional GPU timing and network latency. Retrieve an explicitly
   shared workspace capture or provide a report directly. 0 credits.
 
-### Game Kits (modular)
+### 🎮 Game Kits (modular)
 
 Composable gameplay kits (`vehicle.driveable`, `mission.objectives`, `npc.wanted`…)
 installed into a Game Kit project (`gkp_…`) with dependency resolution, a lockfile
@@ -249,7 +286,7 @@ Full parameters: https://gripforge.ai/mcp-docs
 - `gripforge_game_project` — `action=list|create|get|bind|data|delete` on projects (bindings slot → `lib_…`, data collections, `confirm=true` to delete).
 - `gripforge_game_play_url` — browser play URL of the project's current revision (`{ url, absolute }`).
 
-## Character facing for third-person games
+## 🧍 Character facing for third-person games
 
 Call `gripforge_input_kit` with `{ "prompt": "third person", "third_person": true }`.
 Save the returned `third_person.source_js` as `character-facing.js`; it exports:
@@ -278,14 +315,13 @@ network systems. Omitting `third_person`, or setting it to `false`, returns the
 existing input kit without the additional section. The option is available in
 the hosted MCP and this source checkout; it is not in published npm `0.1.5`.
 
-## Performance diagnostics
+## 📈 Performance diagnostics
 
 `gripforge_performance` is included in this source checkout and the hosted MCP.
 The published npm `0.1.5` package does not include it. Use the hosted endpoint
-above, or build this checkout with `pnpm --filter @gripforgeai/mcp build` and
-configure your MCP client to run `node` with the absolute path to
-`packages/mcp-client/dist/server.js`. Deploying the website does not update an
-installed npm package.
+above, or build this checkout with `npm install && npm run build` and configure
+your MCP client to run `node` with the absolute path to `dist/server.js`.
+Deploying the website does not update an installed npm package.
 
 To retrieve the latest capture explicitly shared from a game in the API key's
 workspace:
@@ -324,7 +360,39 @@ CPU/driver time already included in `cpuMs`; `gpuMs` is meaningful only when
 actually measured. This tool does not control a browser, change game settings,
 publish code or automatically fix a game.
 
-## Env
+## ⚙️ Environment variables
 
 - `GRIPFORGE_API_KEY` (required) — 1 credit = 1 successful attach
 - `GRIPFORGE_API_URL` (optional) — defaults to https://gripforge.ai
+
+A few more variables are optional and only matter for local tools: `GODOT_BIN` (headless verification of a Godot delivery),
+`GRIPFORGE_BLENDER_BIN`, `GRIPFORGE_MCP_NO_UPDATE_CHECK` (turn off the update notice). Never commit a key: see [SECURITY.md](SECURITY.md).
+
+
+## 🗂️ Repository layout
+
+| Folder / file | What it is |
+|---|---|
+| `src/` | The server (TypeScript): `server.ts` registers every tool; one `*-tools.ts` file per family (game kits, scenes, VFX, creatures...) |
+| `src/joystick-kit/` | Touch-joystick kit generators for Godot, Unity and Unreal |
+| `runtime/` | Python and Node helpers shipped with the package (Unreal scene import and export, game import) |
+| `package.json`, `server.json` | npm package and MCP registry manifests (versions move together) |
+| `smithery.yaml`, `glama.json`, `Dockerfile` | Listings and container image for MCP directories |
+| `.github/workflows/publish.yml` | Publishes to npm and to the MCP registry |
+
+## 🛠️ Build from source
+
+```bash
+npm install
+npm run build        # compiles src/ to dist/ (dist/server.js is the entry point)
+GRIPFORGE_API_KEY=gf_... node dist/server.js
+```
+
+## 🤝 Contributing
+
+Pull requests are welcome through the team workflow described in [CONTRIBUTING.md](CONTRIBUTING.md) (written in French).
+Found a vulnerability? Please read [SECURITY.md](SECURITY.md) and report it privately. Support: [.github/SUPPORT.md](.github/SUPPORT.md).
+
+## 📄 License
+
+[MIT](LICENSE)

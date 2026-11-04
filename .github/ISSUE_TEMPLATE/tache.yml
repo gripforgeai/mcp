@@ -1,0 +1,53 @@
+name: 🔨 Tâche
+description: Un morceau de travail suivi sur le kanban
+title: ""
+labels: [chantier]
+projects: ["gripforgeai/1"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Une tâche = une issue, une carte du [kanban](https://github.com/orgs/gripforgeai/projects/1), une branche
+        `labo/<sujet>` partie de `origin/dev`, une PR en brouillon (ou une pile). Titre court et clair.
+  - type: textarea
+    id: but
+    attributes:
+      label: But
+      description: Le problème ou le besoin, en deux ou trois phrases.
+    validations: { required: true }
+  - type: textarea
+    id: termine
+    attributes:
+      label: Terminé quand
+      description: Critères vérifiables (test, capture, mesure…).
+      placeholder: |
+        - [ ] fonctionne dans …, vérifié à la main
+        - [ ] tests ajoutés et CI verte
+        - [ ] doc à jour
+    validations: { required: true }
+  - type: dropdown
+    id: partie
+    attributes:
+      label: Partie concernée
+      multiple: true
+      options:
+        - Outils d'assets (personnages, armes, textures)
+        - Game Kits (gamekit_*)
+        - Livraison locale (Godot, Unity, Unreal)
+        - Import et export de cartes Unreal (runtime/)
+        - Serveur MCP (src/server.ts)
+        - Bus des agents (.gf-bus/)
+        - Publication npm et registre MCP
+        - Dockerfile, Smithery, Glama
+        - Documentation (README, docs.generated)
+        - Autre
+  - type: dropdown
+    id: taille
+    attributes:
+      label: Taille estimée
+      options: [S (moins d'une demi-journée), M (1 à 2 jours), L (la semaine), XL (à découper)]
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Liens, décisions, dépendances avec d'autres tâches.

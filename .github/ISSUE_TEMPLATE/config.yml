@@ -1,0 +1,20 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🗂️ Kanban de l'équipe
+    url: https://github.com/orgs/gripforgeai/projects/1
+    about: Toutes les tâches en cours, tous dépôts confondus.
+  - name: 🌐 gripforge.ai
+    url: https://gripforge.ai/
+    about: Le site GripForge.
+  - name: 🎮 gripforge (site, API, studio, crédits, CLI)
+    url: https://github.com/gripforgeai/gripforge/issues/new/choose
+    about: Un problème du site, de l'API ou du studio.
+  - name: 🧩 module-kits (gamekits, lecteur Bevy, wrappers moteurs)
+    url: https://github.com/gripforgeai/module-kits/issues/new/choose
+    about: Un problème dans un gamekit ou son intégration à un moteur.
+  - name: 🛠️ tools-chain (outils de fabrication d'assets et de jeux)
+    url: https://github.com/gripforgeai/tools-chain/issues/new/choose
+    about: Un outil de fabrication ou ses images Docker.
+  - name: 💬 Support du dépôt mcp
+    url: https://github.com/gripforgeai/mcp/blob/main/.github/SUPPORT.md
+    about: Où poser une question, où signaler quoi.
