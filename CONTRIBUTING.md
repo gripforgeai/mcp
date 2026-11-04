@@ -183,5 +183,5 @@ voir la question ouverte avec le responsable.
 - `runtime/` contient des scripts Python (Unreal) et Node livrés avec le paquet (liste dans `files` de `package.json`).
 - Les messages d'erreur et descriptions d'outils sont en anglais (ils sont lus par des agents IA du monde entier).
 - Secrets : jamais dans le dépôt (voir [SECURITY.md](SECURITY.md)).
-- Le dossier `.gf-bus/` est l'outil de coordination des agents de l'équipe (voir `AGENTS.md`) ; ne le modifiez pas
-  dans une PR de fonctionnalité.
+- Les outils internes de l'équipe (bus des agents, hooks de session) n'entrent jamais dans ce dépôt public : ils sont
+  exclus par `.gitignore` (voir `AGENTS.md`).
