@@ -3,3 +3,7 @@ dist
 *.log
 .DS_Store
 .claude/settings.local.json
+# Outils internes de l'équipe : jamais dans ce dépôt public (voir AGENTS.md)
+.gf-bus/
+.claude/
+.codex/
