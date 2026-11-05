@@ -39,6 +39,7 @@ export const GAMEKIT_TOOL_NAMES = [
   'gripforge_game_project',
   'gripforge_game_art_direction',
   'gripforge_game_publish',
+  'gripforge_game_app_icon',
   'gripforge_game_theme_from_concept',
   'gripforge_game_asset_plan',
   'gripforge_gamekit_creatures',
@@ -707,6 +708,21 @@ export function registerGameKitTools(
     },
     { readOnly: false },
     (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/publish`, { workspace_id: args.workspace_id, published: !args.unpublish, ...(!args.unpublish && args.mode ? { mode: args.mode } : {}) }, 'POST', extra?.signal),
+  );
+
+  tool(
+    'gripforge_game_app_icon',
+    'Generate or reuse the app icon of a game',
+    'One original square icon from the saved game art direction, delivered as PNG, macOS ICNS and Windows ICO in the Library. get returns the latest complete pack. quote prices generation; run queues it after the quoted cost is accepted. Existing icons are reused for free unless regenerate=true. Poll the returned job with gripforge_generation_read. Use files for direct and Steam builds; Steam store artwork is separate.',
+    {
+      project_id: projectId,
+      action: schema.enum(['get', 'quote', 'run']).describe('get reads the saved pack; quote prices it; run queues the accepted quote.'),
+      expected_revision: schema.number().int().positive().optional().describe('Project revision returned by quote, required for generation.'),
+      regenerate: schema.boolean().optional().describe('Generate a new icon instead of reusing the saved pack.'),
+      idempotency_key: schema.string().regex(/^[a-zA-Z0-9_.:-]{8,160}$/).optional().describe('Stable request key for retries; use a new key for a distinct request.'),
+    },
+    { readOnly: false },
+    (args, extra) => api(`gamekit-projects/${enc(args.project_id)}/app-icon`, { workspace_id: args.workspace_id, action: args.action, expected_revision: args.expected_revision, regenerate: args.regenerate, idempotency_key: args.idempotency_key }, 'POST', extra?.signal),
   );
 
   tool(
