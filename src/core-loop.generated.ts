@@ -9,8 +9,12 @@
  * - Web: the render in a Worker (OffscreenCanvas), the physics in its own Worker, by default whenever the page is
  *   cross-origin isolated (shared memory); otherwise the main thread, with the reason shown.
  * - No thread waits on another: each publishes its latest state (double buffer + seq), commands go through queues.
- * - Engines: the tick runs from the frame callback (`_process` / `Update` / component Tick) through the TickClock
- *   accumulator, never from the physics step, which the helpers never retune.
+ * - Engines: the cadence of the loops is decided by game.engine (config `tick`: `source`, `physicsHz`, `syncPhysics`,
+ *   `interpolate`, `maxCatchUp`) and the host plugs each loop on the matching engine callback: by default the action
+ *   tick is `independent` (the TickClock on real time, the actions keep their pace if the physics slows down), or
+ *   `engine-physics` (counted from the physics loop of the engine: Godot `_physics_process`, Unity `FixedUpdate`,
+ *   Unreal physics tick); the engine physics step follows `physicsHz` / `tick.hz`; rendering only interpolates. What
+ *   a game declares in game.engine is accepted by these checks.
  *
  * Dependency-free on purpose: copied into the CLI and the MCP client by tools/kit-modules/sync-third-party.mjs
  * (`core-loop.generated.ts`). Edit this file, then run the tool.
@@ -48,7 +52,7 @@ export const CORE_LOOP_POLICY = `Core loop architecture (mandatory for EVERY gam
 - Three clocks. Game logic (state, actions, timers, rules) runs ONLY on the game tick: game.engine tick.hz, always set explicitly when the game is created (${CORE_LOOP_TICK_TEXT}; live: runtime.core.tickAdjust). Physics keeps its own fixed step. Rendering runs at the display rate and interpolates the tick snapshots (alpha). Frame/present hooks and physics callbacks only READ the published state. Heavy systems run every N ticks (kx.schedule, tick.systems), never a hand-written throttle.
 - Web: rendering in a Worker (OffscreenCanvas) and physics in its own Worker by default (cross-origin isolated page, shared memory); otherwise the main thread with the reason shown. Never write playerWorker=0, memory shared:false or physics placement "main" without a stated reason (a "core-loop-reason: …" comment on that line, or coreLoopReasons.<rule> in the game document).
 - No thread ever waits on another: no Atomics.wait, synchronous worker call or await of another thread on a tick path. Publish the latest state (double buffer + seq); send commands through queues.
-- Godot / Unity / Unreal: the GripForge host steps the tick from the frame callback (_process / Update / component Tick) through the TickClock accumulator with the real dt. Never run game logic in _physics_process, FixedUpdate or an async physics tick, and never retune the engine's physics step (physics_ticks_per_second, Time.fixedDeltaTime): change tick.hz instead. Helpers wrap the engine's native loop, physics, interpolation and threads; they never replace them.
+- Godot / Unity / Unreal: game.engine decides the cadence of the three loops (config tick: source, hz, physicsHz, syncPhysics, interpolate, maxCatchUp) and the GripForge host plugs each on the engine callback (Godot _physics_process / physics_ticks_per_second, Unity FixedUpdate / Time.fixedDeltaTime, Unreal physics tick). Rendering only interpolates (tick_alpha), physics moves the characters at the physics step, the action tick runs the game at tick.hz: tick.source independent (default, the TickClock on real time) or engine-physics (counted from the physics loop of the engine). Game code hooks the action loop with the host signals (action_tick, action_tick_late) or, on Godot, a plain _action_process(tick, dt) / _action_process_late(tick, dt) on any node; gameplay state is not written from _physics_process / FixedUpdate. Retuning the engine physics step by hand is declared in game.engine (tick.physicsHz), never in a script. Helpers wrap the engine's native loop, physics, interpolation and threads; they never replace them.
 - Check it: gripforge game-check (CLI) and gripforge_core_loop_check (MCP) fail a game or kit that breaks these rules, each with its fix; gripforge kit build refuses such a kit; gripforge_game_audit reports a missing tick. Guide: gripforge docs core-loop.`;
 
 export type CoreLoopRuleId =
@@ -67,8 +71,8 @@ export interface CoreLoopRule { id: CoreLoopRuleId; title: string; fix: string; 
 export const CORE_LOOP_RULES: Readonly<Record<CoreLoopRuleId, CoreLoopRule>> = {
   tick_missing: { id: 'tick_missing', reasonable: false, title: 'game.engine has no explicit tick', fix: `Set game.engine tick.hz explicitly for the genre (${CORE_LOOP_TICK_TEXT}): gripforge_gamekit_configure { id: "game.engine", config: { tick: { hz: <hz> } } } (CLI: gripforge kit configure, or "tick": { "hz": <hz> } in the game.engine config of game.json).` },
   frame_mutates_state: { id: 'frame_mutates_state', reasonable: false, title: 'a frame/present hook changes the game state', fix: 'Move the write to the tick (a kit update / late_update, an action, a timer, a hook); a frame or present hook only reads the published snapshot and interpolates it by alpha.' },
-  physics_runs_gameplay: { id: 'physics_runs_gameplay', reasonable: false, title: 'gameplay runs from a physics callback', fix: 'Keep _physics_process / FixedUpdate / the async physics tick / the physics hooks for physics only (forces, velocities, contacts read). Game rules run on the GripForge tick, which the host steps from the frame callback through TickClock (never from the physics step).' },
-  engine_physics_retuned: { id: 'engine_physics_retuned', reasonable: true, title: 'the engine physics step is retuned', fix: 'Leave the engine physics step (physics_ticks_per_second, Time.fixedDeltaTime) at its own value: the game pace is game.engine tick.hz. State the reason on the line ("core-loop-reason: …") if the physics itself truly needs it.' },
+  physics_runs_gameplay: { id: 'physics_runs_gameplay', reasonable: false, title: 'gameplay runs from a physics callback', fix: 'Keep _physics_process / FixedUpdate / the async physics tick / the physics hooks for physics (forces, velocities, contacts, character moves). Game rules run on the GripForge action tick: hook it with the host signals (action_tick, action_tick_late), _action_process(tick, dt) on Godot, or a kit update. Stepping the tick yourself from the physics loop is accepted only when game.engine declares tick.source engine-physics.' },
+  engine_physics_retuned: { id: 'engine_physics_retuned', reasonable: true, title: 'the engine physics step is retuned', fix: 'Declare the physics step in game.engine instead of a script: config tick.physicsHz (or tick.hz with syncPhysics): the host sets physics_ticks_per_second / Time.fixedDeltaTime. A script that sets it by hand is accepted only when the game declares tick.physicsHz; otherwise state the reason on the line ("core-loop-reason: …").' },
   worker_disabled: { id: 'worker_disabled', reasonable: true, title: 'the render Worker is turned off', fix: 'Remove playerWorker=0 from the game (a URL/localStorage debug option ?worker.render=0 / ?workers=0 is fine, it is not a game config): rendering runs in its Worker (OffscreenCanvas) by default and falls back by itself, with its reason, when the page cannot. Keep it only with a stated reason ("core-loop-reason: …" on the line, or coreLoopReasons.worker_disabled in the game document).' },
   shared_memory_disabled: { id: 'shared_memory_disabled', reasonable: true, title: 'shared memory is refused', fix: 'Remove memory shared:false: the tick, render and physics threads share memory whenever the page is cross-origin isolated. Keep it only with a stated reason (coreLoopReasons.shared_memory_disabled in the game document, or "core-loop-reason: …" on the line).' },
   physics_main_thread: { id: 'physics_main_thread', reasonable: true, title: 'physics is forced onto the main thread', fix: 'Remove the physics placement "main" (or placement:false): physics runs on its own Worker by default when memory is shared. Keep it only with a stated reason (coreLoopReasons.physics_main_thread in the game document, or "core-loop-reason: …" on the line).' },
@@ -106,6 +110,22 @@ export function engineTickOf(installed: unknown): { installed: boolean; hz: numb
   const tick = isObj(engine.config) ? engine.config.tick : undefined;
   const hz = isObj(tick) && typeof tick.hz === 'number' && Number.isFinite(tick.hz) ? tick.hz : null;
   return { installed: true, hz };
+}
+
+/** What a game declares of its loops in game.engine `tick` (docs/game-engine-contract.md « Boucles »). */
+export interface CoreLoopDeclared {
+  /** `tick.source`: `independent` (default: the TickClock on real time) or `engine-physics` (counted from the physics loop). */
+  source: 'independent' | 'engine-physics';
+  /** `tick.physicsHz` is set: a script may not retune the physics step, the host does. */
+  physicsHz: boolean;
+}
+
+/** The loops game.engine declares in a project's `installed` list (defaults when it declares none). */
+export function engineLoopsOf(installed: unknown): CoreLoopDeclared {
+  const engine = Array.isArray(installed) ? installed.find((k) => isObj(k) && k.id === 'game.engine' && k.enabled !== false) as Record<string, unknown> | undefined : undefined;
+  const tick = engine && isObj(engine.config) && isObj(engine.config.tick) ? engine.config.tick : {};
+  const source = tick.source === 'engine-physics' ? 'engine-physics' : 'independent';
+  return { source, physicsHz: typeof tick.physicsHz === 'number' && tick.physicsHz >= 1 };
 }
 
 /** The reasons a game document states, by rule (`coreLoopReasons` at its root, in its `schema` or its `project`). */
@@ -171,8 +191,8 @@ export function coreLoopLanguage(file: string): Lang | null {
 const HOOKS: Record<Exclude<Lang, 'html'>, { frame: string[]; physics: string[]; tick: string[] }> = {
   js: { frame: ['frame', 'onFrame', 'present', 'onPresent', 'presentFrame', 'render', 'onRender', 'onBeforeRender', 'draw'], physics: ['onPhysics', 'physicsStep', 'onPhysicsStep', 'afterPhysics', 'beforePhysics', 'fixedUpdate'], tick: ['update', 'lateUpdate', 'tick', 'onTick'] },
   rs: { frame: ['present', 'present_frame', 'on_frame'], physics: ['physics', 'on_physics', 'physics_step', 'after_physics', 'before_physics', 'fixed_update'], tick: ['update', 'late_update', 'tick', 'on_tick'] },
-  gd: { frame: [], physics: ['_physics_process', '_integrate_forces'], tick: ['_process', 'on_tick', '_on_tick'] },
-  cs: { frame: ['OnPreRender', 'OnRenderObject', 'OnPostRender', 'OnBeginCameraRendering'], physics: ['FixedUpdate', 'OnPhysicsStep'], tick: ['Update', 'LateUpdate', 'OnTick'] },
+  gd: { frame: [], physics: ['_physics_process', '_integrate_forces'], tick: ['_process', 'on_tick', '_on_tick', '_action_process', '_action_process_late'] },
+  cs: { frame: ['OnPreRender', 'OnRenderObject', 'OnPostRender', 'OnBeginCameraRendering'], physics: ['FixedUpdate', 'OnPhysicsStep'], tick: ['Update', 'LateUpdate', 'OnTick', 'OnActionTick', 'OnActionTickLate'] },
   cpp: { frame: [], physics: ['AsyncPhysicsTickComponent', 'AsyncPhysicsTickActor', 'PhysicsTick', 'OnPhysicsStep', 'SubstepTick'], tick: ['Tick', 'TickComponent', 'OnTick'] },
 };
 
@@ -291,7 +311,7 @@ function rafBodies(code: string): Body[] {
  * The checks of one source file (a game script, a kit's code, a page): game state written by a frame hook, gameplay in
  * a physics callback, the engine physics step retuned, a tick path that waits, the threads turned off without reason.
  */
-export function checkCoreLoopSource(file: string, text: string): CoreLoopIssue[] {
+export function checkCoreLoopSource(file: string, text: string, declared: CoreLoopDeclared = { source: 'independent', physicsHz: false }): CoreLoopIssue[] {
   const lang = coreLoopLanguage(file);
   if (!lang || text.length > 4 * 1024 * 1024) return [];
   const raw = text.split('\n');
@@ -317,19 +337,19 @@ export function checkCoreLoopSource(file: string, text: string): CoreLoopIssue[]
   if (lang === 'html') return out;
   const hooks = HOOKS[lang];
   const bodies = (names: string[]) => (lang === 'gd' ? gdBodies(code, names) : braceBodies(code, names, lang));
-  const scan = (body: Body, res: RegExp[], rule: CoreLoopRuleId, where: string) => {
+  const scan = (body: Body, res: RegExp[], rule: CoreLoopRuleId, where: string, skip?: RegExp) => {
     const part = code.slice(body.start, body.end);
     for (const re of res) {
       const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
       let m: RegExpExecArray | null;
-      while ((m = g.exec(part))) push(rule, `${m[0].trim().slice(0, 48)} in ${where}`, body.start + m.index);
+      while ((m = g.exec(part))) if (!skip?.test(m[0])) push(rule, `${m[0].trim().slice(0, 48)} in ${where}`, body.start + m.index);
     }
   };
   const frames = [...bodies(hooks.frame), ...(lang === 'js' ? rafBodies(code) : [])];
   for (const b of frames) scan(b, MUTATES[lang], 'frame_mutates_state', `${b.name}()`);
-  for (const b of bodies(hooks.physics)) { scan(b, MUTATES[lang], 'physics_runs_gameplay', `${b.name}()`); scan(b, [STEPS_TICK], 'physics_runs_gameplay', `${b.name}() steps the game tick`); }
+  for (const b of bodies(hooks.physics)) { scan(b, MUTATES[lang], 'physics_runs_gameplay', `${b.name}()`, declared.source === 'engine-physics' ? STEPS_TICK : undefined); if (declared.source !== 'engine-physics') scan(b, [STEPS_TICK], 'physics_runs_gameplay', `${b.name}() steps the game tick`); }
   for (const b of bodies(hooks.tick)) scan(b, WAITS[lang], 'sync_worker_call', `${b.name}()`);
-  for (const re of RETUNES[lang] ?? []) {
+  for (const re of declared.physicsHz ? [] : RETUNES[lang] ?? []) {
     const g = new RegExp(re.source, 'g');
     let m: RegExpExecArray | null;
     while ((m = g.exec(code))) push('engine_physics_retuned', m[0].trim().slice(0, 48), m.index);
@@ -340,12 +360,22 @@ export function checkCoreLoopSource(file: string, text: string): CoreLoopIssue[]
 /** The checks of a set of files: sources by language, JSON documents as game documents. */
 export function checkCoreLoopFiles(files: ReadonlyArray<{ path: string; text: string }>): CoreLoopIssue[] {
   const out: CoreLoopIssue[] = [];
+  // What the game declares in game.engine is what the source checks accept.
+  let declared: CoreLoopDeclared = { source: 'independent', physicsHz: false };
+  for (const f of files) {
+    if (!/\.json$/i.test(f.path)) continue;
+    try {
+      const doc = JSON.parse(f.text) as unknown;
+      const project = isObj(doc) && isObj(doc.project) ? doc.project : doc;
+      if (isObj(project) && Array.isArray(project.installed) && project.installed.some((k) => isObj(k) && k.id === 'game.engine')) declared = engineLoopsOf(project.installed);
+    } catch { /* not a game document */ }
+  }
   for (const f of files) {
     if (/\.json$/i.test(f.path)) {
       let doc: unknown;
       try { doc = JSON.parse(f.text); } catch { continue; }
       out.push(...checkCoreLoopDocument(doc, f.path));
-    } else out.push(...checkCoreLoopSource(f.path, f.text));
+    } else out.push(...checkCoreLoopSource(f.path, f.text, declared));
   }
   return out;
 }

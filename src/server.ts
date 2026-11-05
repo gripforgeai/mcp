@@ -30,6 +30,7 @@ import { registerCreatureGenerationTools } from './creature-generation-tools.js'
 import { absolute, computeGenerateShape, computeGenerator, registerComputeTools } from './compute-tools.js';
 import { registerFacialRigTools } from './facial-rig-tools.js';
 import { registerGameAudioTools } from './game-audio-tools.js';
+import { registerGameReleaseTools } from './game-release-tools.js';
 import { registerVoiceProfileTools } from './voice-profile-tools.js';
 import { registerWeaponMotionTools } from './weapon-motion-tools.js';
 import { registerShieldVfxTools } from './shield-vfx-tools.js';
@@ -85,6 +86,7 @@ registerCreatureGenerationTools((server as unknown as { registerTool: VfxProject
 registerFacialRigTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerVoiceProfileTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerGameAudioTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
+registerGameReleaseTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerWeaponMotionTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerShieldVfxTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
 registerProjectileTools((server as unknown as { registerTool: VfxProjectRegister }).registerTool.bind(server), { apiUrl: API_URL, getApiKey: () => API_KEY });
