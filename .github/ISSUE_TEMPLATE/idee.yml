@@ -1,0 +1,37 @@
+name: 💡 Idée
+description: Proposer une nouveauté ou une amélioration
+title: "[idée] "
+labels: [amélioration]
+body:
+  - type: textarea
+    id: besoin
+    attributes:
+      label: Le besoin
+      description: Qui en a besoin (joueurs, créateurs de jeux, agents IA, équipe), et pour quoi faire ?
+    validations: { required: true }
+  - type: textarea
+    id: proposition
+    attributes:
+      label: Proposition
+      description: Ce que vous imaginez. Un exemple, un croquis ou une capture aide beaucoup.
+  - type: dropdown
+    id: partie
+    attributes:
+      label: Partie concernée
+      multiple: true
+      options:
+        - Outils d'assets (personnages, armes, textures)
+        - Game Kits (gamekit_*)
+        - Livraison locale (Godot, Unity, Unreal)
+        - Import et export de cartes Unreal (runtime/)
+        - Serveur MCP (src/server.ts)
+        - Bus des agents (.gf-bus/)
+        - Publication npm et registre MCP
+        - Dockerfile, Smithery, Glama
+        - Documentation (README, docs.generated)
+        - Autre
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Autres pistes
+      description: Ce qu'on fait aujourd'hui à la place, ou d'autres solutions envisagées.

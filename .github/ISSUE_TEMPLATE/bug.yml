@@ -1,0 +1,65 @@
+name: 🐛 Bug
+description: Quelque chose ne fait pas ce qu'il devrait
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci ! Une issue bien remplie se corrige beaucoup plus vite. **Aucun secret** (jeton, clé, mot de passe) ni
+        chemin de disque dans ce formulaire. Une faille de sécurité ne va pas ici : voir `SECURITY.md`.
+  - type: textarea
+    id: quoi
+    attributes:
+      label: Ce qui se passe
+      description: Et ce qui devrait se passer à la place.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Pour reproduire
+      placeholder: |
+        1. …
+        2. …
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version ou commit
+      placeholder: v0.5.59, ou le début du commit
+  - type: dropdown
+    id: partie
+    attributes:
+      label: Partie concernée
+      multiple: true
+      options:
+        - Outils d'assets (personnages, armes, textures)
+        - Game Kits (gamekit_*)
+        - Livraison locale (Godot, Unity, Unreal)
+        - Import et export de cartes Unreal (runtime/)
+        - Serveur MCP (src/server.ts)
+        - Bus des agents (.gf-bus/)
+        - Publication npm et registre MCP
+        - Dockerfile, Smithery, Glama
+        - Documentation (README, docs.generated)
+        - Autre
+  - type: dropdown
+    id: gravite
+    attributes:
+      label: Gravité
+      description: Production cassée = urgence, prévenir aussi sur le Discord de l'équipe.
+      options: [Production cassée, Gênant, Mineur]
+      default: 1
+  - type: textarea
+    id: journaux
+    attributes:
+      label: Journaux
+      description: Messages d'erreur, sortie de la console. **Retirer les jetons et clés avant de coller.**
+      render: shell
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Secrets
+      options:
+        - label: Je n'ai collé aucun secret (jeton, clé d'API, mot de passe).
+          required: true

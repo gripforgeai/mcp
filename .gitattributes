@@ -1,0 +1,2 @@
+# Hook git partagé (CONTRIBUTING.md) : toujours en LF, sinon sh le refuse sous Windows.
+.githooks/* text eol=lf
